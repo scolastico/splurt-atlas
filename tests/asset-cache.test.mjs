@@ -49,3 +49,13 @@ test('switching storage modes discards both in-flight downloads and buffered wri
  cache.setMode('all');globalThis.fetch=async()=>new Response('buffered sprite');await cache.get('https://example.test/buffered','first/buffered.webp','low');
  cache.setMode('none');await cache.prune();await cache.flushWrites();assert.equal(await cache.read('test-storage-race:revision:first/buffered.webp'),null);
 });
+test('an incremental release retains cached images for maps that were reused',async()=>{
+ preferences.clear();const cache=new AssetCache('test-map-versions');cache.setMode('all');let requests=0;
+ globalThis.fetch=async()=>{requests++;return new Response('sprite');};
+ cache.setManifest({buildId:'build-1',maps:[{id:'one',assetVersion:'one-1'},{id:'two',assetVersion:'two-1'}]});
+ await cache.get('https://example.test/one','one/base.webp');await cache.get('https://example.test/two','two/base.webp');
+ cache.setManifest({buildId:'build-2',maps:[{id:'one',assetVersion:'one-2'},{id:'two',assetVersion:'two-1'}]});await cache.prune();
+ await cache.get('https://example.test/two','two/base.webp');assert.equal(requests,2);
+ await cache.get('https://example.test/one','one/base.webp');assert.equal(requests,3);
+ assert.equal(await cache.read('test-map-versions:one-1:one/base.webp'),null);
+});

@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import sharp from 'sharp';
 import { parseDmm } from './lib/dmm.mjs';
@@ -10,7 +11,8 @@ import { promote } from './promote.mjs';
 import { writeMipmaps } from './lib/image-pyramid.mjs';
 import { buildInfrastructure } from './lib/infrastructure.mjs';
 import { createDoorResolver } from './lib/door-access.mjs';
-import { bakeRuntimeTerrain } from './lib/runtime-terrain.mjs';
+import { bakeRuntimeTerrain, runtimeReplacement } from './lib/runtime-terrain.mjs';
+import { digest, converterDigest, loadBaseline, completeMap, reuseMap, canQuickReuse, mapFingerprint, legacyMatches } from './lib/incremental.mjs';
 
 sharp.cache({ memory: 128, files: 20, items: 100 });
 const config = JSON.parse(readFileSync('atlas.config.json'));
@@ -20,14 +22,34 @@ if (!existsSync(root)) throw new Error('Run pnpm source first.');
 const provenance = JSON.parse(readFileSync('.source/provenance.json'));
 if (provenance.commit !== config.ref) throw new Error('Source pin changed: run pnpm source first.');
 const args = process.argv.slice(2).filter(v => v !== '--');
+const incremental = args.includes('--incremental'), adopt = args.includes('--adopt-baseline');
+const mapArgs = args.filter(arg => !['--incremental', '--adopt-baseline', '--full'].includes(arg));
+const baseline = incremental && !args.includes('--full') ? loadBaseline(process.env.ATLAS_BASELINE || '.cache/baseline/data') : null;
+const converter = converterDigest();
+let changed = null;
+if (baseline) {
+  try {
+    const previous = baseline.manifest.commit;
+    if (!/^[a-f0-9]{40}$/.test(previous)) throw new Error('Invalid baseline revision');
+    try { execFileSync('git', ['cat-file', '-e', `${previous}^{commit}`], { cwd: root, stdio: 'ignore' }); }
+    catch { execFileSync('git', ['fetch', '--depth=1', 'origin', previous], { cwd: root, stdio: 'inherit' }); }
+    changed = execFileSync('git', ['diff', '--no-renames', '--name-only', '-z', previous, provenance.commit], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).split('\0').filter(Boolean);
+    console.log(`Upstream changes since ${previous.slice(0,12)}: ${changed.length} files`);
+  } catch (error) { console.log(`File comparison unavailable; checking all map inputs: ${error.message}`); }
+}
 const available = readdirSync(`${root}/_maps`).filter(v => v.endsWith('.json'));
-const selected = (args.includes('--all') || (!args.length&&config.maps==='all') ? available.map(v => v.slice(0, -5)) : (args.length ? args : config.maps)).filter(id=>!(config.excludeMaps||[]).includes(id));
+const selected = (mapArgs.includes('--all') || (!mapArgs.length&&config.maps==='all') ? available.map(v => v.slice(0, -5)) : (mapArgs.length ? mapArgs : config.maps)).filter(id=>!(config.excludeMaps||[]).includes(id));
 mkdirSync(output, { recursive: true });
 console.log('Indexing DM declarations in include order…');
 const db = loadTypes(root), sprites = createSpriteReader(root);
+let usedTypes = new Set(), usedIcons = new Set();
+const resolveType = db.resolve, hasState = sprites.hasState;
+db.resolve = (type, ...rest) => { if(type)usedTypes.add(type);return resolveType(type,...rest); };
+sprites.hasState = (icon,state) => { if(icon)usedIcons.add(icon);return hasState(icon,state); };
 db.hasIconState = sprites.hasState;
 console.log(`${db.types.size} types from ${db.fileCount} DM files`);
-const manifest = { schema: 2, buildId:randomUUID(), ...provenance, tilePixels: config.tilePixels, chunkTiles: config.chunkTiles, maps: [] };
+const manifest = { schema: 2, buildId:randomUUID(), converter, ...provenance, tilePixels: config.tilePixels, chunkTiles: config.chunkTiles, maps: [] };
+const rebuilt = [], reused = [], iconHashes = new Map();
 const S = config.tilePixels, C = config.chunkTiles, P = S * C;
 const imageCache = new Map();
 const numeric = (v, fallback) => Number.isFinite(Number(v)) ? Number(v) : fallback;
@@ -71,12 +93,17 @@ async function tileImage(atoms, channel) {
 
 for (const id of selected) {
   imageCache.clear();
+  usedTypes = new Set(); usedIcons = new Set();
   if (!/^[\w-]+$/.test(id)) throw new Error(`Invalid map id ${id}`);
+  const previous = baseline?.manifest.maps.find(map => map.id === id);
+  const dir = `${output}/${id}`;
+  if(canQuickReuse(baseline,previous,converter,changed,config) && completeMap(baseline.root,previous)){
+    manifest.maps.push(reuseMap(baseline,previous,dir));reused.push(id);console.log(`${id}: reused (no relevant file changes)`);continue;
+  }
   const meta = JSON.parse(readFileSync(`${root}/_maps/${id}.json`));
   const doorAccess=createDoorResolver(db,meta.job_changes||{});
   if (!meta.map_path || !meta.map_file) { console.log(`Skipping non-station config ${id}`); continue; }
   const files = Array.isArray(meta.map_file) ? meta.map_file : [meta.map_file];
-  const dir = `${output}/${id}`;
   // Only remove generated output for this map, never source or arbitrary paths.
   if (existsSync(dir)) rmSync(dir, { recursive: true });
   mkdirSync(dir, { recursive: true });
@@ -153,6 +180,20 @@ for (const id of selected) {
     return { ...area, points };
   }).filter(room => room.points.length);
   const mapMeta = { id, name: meta.map_name, width, height, levels, areas, rooms, jobRoles:doorAccess.roles, infrastructure, definitions: defs, files: files.map(file => `_maps/${meta.map_path}/${file}`), traits: meta.traits || [], unresolvedSpawners: [...new Set(unresolved)] };
+  // Resolve generated terrain before comparing metadata and rendering inputs.
+  for(const def of defs){const replacement=runtimeReplacement(def,areas[def.area],db);if(replacement)def.runtimeTerrain=replacement;}
+  const recordIcon = atom => { const icon=unquote(({...db.resolve(atom.path),...atom.vars}).icon);if(icon.endsWith('.dmi'))usedIcons.add(icon); };
+  for(const atoms of expanded.values())for(const atom of atoms)recordIcon(atom);
+  for(const cell of cells)for(const atom of cell.appearance)if(atom.vars.icon)recordIcon(atom);
+  const types=[...usedTypes].sort().map(type=>[type,resolveType(type)]);
+  for(const [,vars]of types){const icon=unquote(vars.icon);if(icon.endsWith('.dmi'))usedIcons.add(icon);}
+  const icons=[...usedIcons].sort().map(icon=>{if(!iconHashes.has(icon)){try{iconHashes.set(icon,digest(readFileSync(`${root}/${icon}`)));}catch{iconHashes.set(icon,null);}}return[icon,iconHashes.get(icon)];});
+  const fingerprint=mapFingerprint({converter,config,metadata:mapMeta,items,cells,types,icons});
+  const inputs=[`_maps/${id}.json`,...mapMeta.files,...icons.map(([icon])=>icon)];
+  if(previous && (previous.fingerprint===fingerprint || (adopt && legacyMatches(baseline,previous,provenance.commit,mapMeta,items))) && completeMap(baseline.root,previous)){
+    manifest.maps.push({...reuseMap(baseline,previous,dir),fingerprint,inputs});reused.push(id);console.log(`${id}: reused (rendering inputs unchanged)`);continue;
+  }
+  rebuilt.push(id);
   writeFileSync(`${dir}/map.json`, JSON.stringify(mapMeta));
   for (const z of levels) {
     console.log(`${meta.map_name} · Z${z}: rendering ${width} × ${height}`);
@@ -208,13 +249,16 @@ for (const id of selected) {
   writeFileSync(`${dir}/report.json`, JSON.stringify({ unresolvedSpawners: mapMeta.unresolvedSpawners, sprites: sprites.report, note: 'Static declarations only; no DM runtime. See README for fidelity limits.' }, null, 2));
   const assets=[];function listAssets(folder,prefix=''){for(const entry of readdirSync(folder,{withFileTypes:true})){const name=prefix+entry.name;if(entry.isDirectory())listAssets(`${folder}/${entry.name}`,name+'/');else assets.push({path:name,bytes:readFileSync(`${folder}/${entry.name}`).length});}}
   listAssets(dir);writeFileSync(`${dir}/assets.json`,JSON.stringify(assets));
-  manifest.maps.push({ id, name: meta.map_name, width, height, levels, items: items.length,assets:`${id}/assets.json`,bytes:assets.reduce((n,a)=>n+a.bytes,0),preview:existsSync(`${dir}/${levels.at(-1)}/base-overview.webp`)?`${id}/${levels.at(-1)}/base-overview.webp`:null });
+  manifest.maps.push({ id, name: meta.map_name, width, height, levels, items: items.length,fingerprint,inputs,assetVersion:fingerprint,assets:`${id}/assets.json`,bytes:assets.reduce((n,a)=>n+a.bytes,0),preview:existsSync(`${dir}/${levels.at(-1)}/base-overview.webp`)?`${id}/${levels.at(-1)}/base-overview.webp`:null });
   if(existsSync(`${dir}/${levels.at(-1)}/natural-overview.webp`))manifest.maps.at(-1).naturalPreview=`${id}/${levels.at(-1)}/natural-overview.webp`;
 }
 copyFileSync(`${root}/LICENSE`, `${output}/UPSTREAM-LICENSE.txt`);
 copyFileSync(`${root}/README.md`, `${output}/UPSTREAM-README.md`);
 copyFileSync('NOTICE', `${output}/ATLAS-NOTICE.txt`);
-writeFileSync(`${output}/asset-sources.json`, JSON.stringify({ ...provenance, icons: [...sprites.icons].sort() }, null, 2));
+writeFileSync(`${output}/asset-sources.json`, JSON.stringify({ ...provenance, icons: [...new Set(manifest.maps.flatMap(map=>(map.inputs||[]).filter(file=>file.endsWith('.dmi'))))].sort() }, null, 2));
+writeFileSync(`${output}/build-report.json`,JSON.stringify({commit:provenance.commit,baseline:baseline?.manifest.commit||null,changedFiles:changed,rebuilt,reused,forced:args.includes('--full')},null,2));
 writeFileSync(`${output}/manifest.json`, JSON.stringify(manifest, null, 2));
+// Release libvips file handles before the atomic directory swap on Windows.
+sharp.cache(false);
 promote(output);
 console.log(`Exported ${manifest.maps.length} stations. Sprite report:`, sprites.report);

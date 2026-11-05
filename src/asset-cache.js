@@ -27,14 +27,16 @@ export class AssetCache {
     await this.flushing;this.flushing=null;if(this.buffer.size)return this.flushWrites();
   }
   get enabled(){return this.mode==='all'||this.mode==='current';}
+  setManifest(manifest){this.version=manifest.buildId||manifest.commit;this.mapVersions=new Map(manifest.maps.map(map=>[map.id,map.assetVersion||this.version]));}
+  versionFor(path){return this.mapVersions?.get(path.split('/')[0])||this.version;}
   canStore(path){return this.mode==='all'||(this.mode==='current'&&this.currentMap&&path.startsWith(this.currentMap+'/'));}
-  canStoreKey(key){const prefix=`${this.scope}:${this.version}:`;return this.enabled&&(key===`${this.scope}:catalog`||(key.startsWith(prefix)&&this.canStore(key.slice(prefix.length))));}
+  canStoreKey(key){const prefix=this.scope+':';if(!this.enabled||!key.startsWith(prefix))return false;if(key===`${prefix}catalog`)return true;const suffix=key.slice(prefix.length),split=suffix.indexOf(':'),file=suffix.slice(split+1);return split>0&&suffix.slice(0,split)===this.versionFor(file)&&this.canStore(file);}
   setMode(mode){if(!['all','current','none'].includes(mode))throw new Error('Invalid storage mode');this.mode=mode;this.warmRun++;try{localStorage.setItem('atlas-storage-mode',mode);}catch{}this.onStatus(mode==='none'?'Offline storage is off.':mode==='current'?'Preparing current map storage...':'Preparing offline maps...');}
   setCurrentMap(id){if(this.currentMap!==id){this.currentMap=id;this.warmRun++;if(this.mode==='current')this.onStatus('Preparing current map storage...');try{localStorage.setItem('atlas-storage-map',id||'');}catch{}}}
   async prune(){
     const db=await this.database;await this.keysReady;if(this.flushing)await this.flushing;if(!db||!this.mode)return;
-    const prefix=this.scope+':',catalog=prefix+'catalog',revision=prefix+this.version+':';
-    const keep=key=>this.enabled&&(key===catalog||(key.startsWith(revision)&&this.canStore(key.slice(revision.length))));
+    const prefix=this.scope+':';
+    const keep=key=>this.canStoreKey(key);
     for(const key of this.buffer.keys())if(key.startsWith(prefix)&&!keep(key))this.buffer.delete(key);
     const obsolete=[...(this.keys||[])].filter(key=>key.startsWith(prefix)&&!keep(key));if(!obsolete.length)return;
     await new Promise(resolve=>{const tx=db.transaction('assets','readwrite'),store=tx.objectStore('assets');for(const key of obsolete)store.delete(key);tx.oncomplete=()=>{for(const key of obsolete)this.keys.delete(key);resolve();};tx.onerror=tx.onabort=()=>resolve();});
@@ -45,7 +47,7 @@ export class AssetCache {
     catch(error){const cached=this.enabled&&await this.read(key);if(cached)return JSON.parse(await cached.text());throw error;}
   }
   async get(url,path,priority='auto'){
-    const key=`${this.scope}:${this.version}:${path}`;
+    const key=`${this.scope}:${this.versionFor(path)}:${path}`;
     if(this.pending.has(key))return this.pending.get(key);
     const task=(async()=>{
       const stored=this.canStore(path)&&await this.read(key);if(stored)return stored;
@@ -68,7 +70,7 @@ export class AssetCache {
       }));
       const assets=lists.flat();total=assets.length;let cursor=0,last=0;
       const totalBytes=assets.reduce((n,item)=>n+item.bytes,0);
-      const worker=async()=>{while(this.enabled&&!this.storageFull&&run===this.warmRun&&cursor<assets.length){if(this.foregroundBusy){await new Promise(resolve=>setTimeout(resolve,100));continue;}const item=assets[cursor++],key=`${this.scope}:${this.version}:${item.path}`;if(!(await this.keysReady)?.has(key)&&!this.buffer.has(key))await this.get(new URL(item.path,base),item.path,'low');complete++;bytes+=item.bytes;const now=performance.now();if(this.enabled&&run===this.warmRun&&!this.storageFull&&(now-last>200||complete===total)){last=now;this.onStatus(`Saving ${this.mode==='all'?'all maps':'current map'}: ${Math.round(complete/total*100)}% · ${Math.round(bytes/1048576)} / ${Math.round(totalBytes/1048576)} MB`);}}};
+      const worker=async()=>{while(this.enabled&&!this.storageFull&&run===this.warmRun&&cursor<assets.length){if(this.foregroundBusy){await new Promise(resolve=>setTimeout(resolve,100));continue;}const item=assets[cursor++],key=`${this.scope}:${this.versionFor(item.path)}:${item.path}`;if(!(await this.keysReady)?.has(key)&&!this.buffer.has(key))await this.get(new URL(item.path,base),item.path,'low');complete++;bytes+=item.bytes;const now=performance.now();if(this.enabled&&run===this.warmRun&&!this.storageFull&&(now-last>200||complete===total)){last=now;this.onStatus(`Saving ${this.mode==='all'?'all maps':'current map'}: ${Math.round(complete/total*100)}% · ${Math.round(bytes/1048576)} / ${Math.round(totalBytes/1048576)} MB`);}}};
       await Promise.all(Array.from({length:4},worker));
       await this.flushWrites();if(this.enabled&&!this.storageFull&&run===this.warmRun&&complete===total)this.onStatus(`${this.mode==='all'?`All ${maps.length} maps`:'Current map'} saved for reopening (${Math.round(bytes/1048576)} MB).`);
     }catch(error){if(run===this.warmRun)this.onStatus(`Offline saving paused: ${error.message}. Reopening will retry.`);}

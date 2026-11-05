@@ -726,7 +726,7 @@ restoreOptions(new URLSearchParams(location.hash.slice(1)));
 try {
   state.manifest = await json('manifest.json');
   dataBase = new URL(state.manifest.dataPath || './',base);
-  assetCache.version=state.manifest.buildId||state.manifest.commit;
+  assetCache.setManifest(state.manifest);
   const requested=new URLSearchParams(location.hash.slice(1)).get('m');
   if(state.manifest.maps.some(map=>map.id===requested))assetCache.setCurrentMap(requested);
   await chooseStorage();
