@@ -1,0 +1,741 @@
+import './style.css';
+import { detailForZoom, deckScale, selectedTile, viewFragment, optionBits,encodeOptions,decodeOptions } from './view-state.js';
+import { AssetCache } from './asset-cache.js';
+
+const $ = id => document.getElementById(id);
+if (import.meta.env.VITE_ATLAS_SOURCE_URL) { $('atlas-source').href = import.meta.env.VITE_ATLAS_SOURCE_URL; $('atlas-source').hidden = false; }
+const canvas = $('map'), ctx = canvas.getContext('2d');
+const connectionsCanvas = $('connection-overlay'), connectionsContext = connectionsCanvas.getContext('2d');
+let connectionsFrame = 0, lastConnectionsPaint = 0;
+const space = $('space'), background = space.getContext('2d', { alpha: false });
+const scratch = document.createElement('canvas'), sc = scratch.getContext('2d');
+const layer = document.createElement('canvas'), lc = layer.getContext('2d');
+const palette = { pipes: '#68c8b2', power: '#e5bd69', disposal: '#ce8baf', transit: '#80addb' };
+const networkNames = { pipes: 'Atmospherics', power: 'Power cables', disposal: 'Waste disposal', transit: 'Transit tubes' };
+const enabled = new Set(['transit']);
+const base = new URL('./data/', document.baseURI);
+let dataBase = base;
+const assetCache=new AssetCache(base.href,message=>{$('cache-status').textContent=message;});
+$('storage-mode').value=assetCache.mode||'all';
+$('cache-status').textContent=assetCache.enabled?'Preparing offline maps…':'Offline saving is off.';
+const state = { manifest: null, map: null, levels: new Map(), z: 1, zoom: 1, x: 0, y: 0, w: 0, h: 0, dpr: 1, generation: 0, markers: [], selected: null, motion: true, cutaway: true, regions: false, hover: null, searchReady: false };
+let worker, searchSeq = 0, timer, frame = 0, shareTimer, activeRequests = 0;
+let finding = null, findingPage = 0, findingIndex = 0, locationSeq = 0, pulseStart = -Infinity;
+let locationTarget = null;
+let utilityPaths=new Map(),sidebarWidth=320;
+let inspectorDetailHTML='';
+const FINDINGS_PER_PAGE = 30;
+const images = new Map(), queue = [], failures = new Set();
+const CACHE_BYTES = 128 * 1024 * 1024, MAX_REQUESTS = 8;
+let warmImages=new Set(),loadingStation=false,inspectedResult=null,tileSeq=0,tileCandidates=[];
+let frameImages = new Set(), spaceFrame = 0, spaceTime = 0, lastSpaceTime = null, lastSpacePaint = 0;
+const redraw = () => { if (!frame) frame = requestAnimationFrame(render); };
+const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+$('motion').checked = state.motion = !reduced.matches;
+reduced.addEventListener('change', event => { state.motion = $('motion').checked = !event.matches; updateSpaceAnimation(); redraw(); });
+
+function sidebarInset() { return innerWidth > 650 && !document.body.classList.contains('sidebar-collapsed') ? $('sidebar').getBoundingClientRect().width : 0; }
+function screenCenterX() { return (state.w + sidebarInset()) / 2; }
+function sidebar(collapsed, persist = true) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  $('sidebar').inert = collapsed;
+  $('sidebar-toggle').setAttribute('aria-expanded', String(!collapsed));
+  $('sidebar-toggle').setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  $('sidebar-toggle').title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  $('sidebar-toggle').textContent = collapsed ? '›' : '‹';
+  if (persist) { redraw(); try { localStorage.setItem('atlas-sidebar-collapsed', String(collapsed)); } catch {} }
+}
+let initiallyCollapsed = matchMedia('(max-width:650px)').matches;
+try { const saved = localStorage.getItem('atlas-sidebar-collapsed'); if (saved !== null) initiallyCollapsed = saved === 'true'; } catch {}
+sidebar(initiallyCollapsed, false);
+function sidebarView(view) {
+  view=view===true?'inspect':view===false?'explore':view;
+  for(const name of ['explore','search','inspect']){
+    $(name==='inspect'?'selection-panel':`${name}-panel`).hidden=name!==view;
+    $(`${name}-tab`).setAttribute('aria-pressed',String(name===view));
+  }
+  document.querySelector('.sidebar-scroll').scrollTop = 0;
+}
+function clearSelection() {
+  state.result = null; state.finding = null; locationTarget = null; locationSeq++;
+  finding = null; state.markers = []; $('search-findings').hidden = true;
+  state.selected = null; $('inspect-tab').disabled = true; sidebarView(false); redraw(); share();
+}
+$('sidebar-toggle').onclick = () => sidebar(!document.body.classList.contains('sidebar-collapsed'));
+$('explore-tab').onclick = () => sidebarView(false);
+$('search-tab').onclick = () => sidebarView('search');
+$('inspect-tab').onclick = () => { if (state.selected) sidebarView(true); };
+try{sidebarWidth=Number(localStorage.getItem('atlas-sidebar-width'))||320;}catch{}
+function applySidebarWidth(value,persist=false){const width=Math.round(Math.max(260,Math.min(value,720,innerWidth-40)));document.documentElement.style.setProperty('--sidebar-width',`${width}px`);$('sidebar-resize').setAttribute('aria-valuenow',width);if(persist){redraw();sidebarWidth=width;try{localStorage.setItem('atlas-sidebar-width',width);}catch{}}}
+applySidebarWidth(sidebarWidth);window.addEventListener('resize',()=>applySidebarWidth(sidebarWidth));
+$('sidebar-resize').onpointerdown=event=>{$('sidebar-resize').setPointerCapture(event.pointerId);document.body.classList.add('resizing');};
+$('sidebar-resize').onpointermove=event=>{if($('sidebar-resize').hasPointerCapture(event.pointerId))applySidebarWidth(event.clientX,true);};
+$('sidebar-resize').onpointerup=event=>{$('sidebar-resize').releasePointerCapture(event.pointerId);document.body.classList.remove('resizing');};
+$('sidebar-resize').onpointercancel=()=>document.body.classList.remove('resizing');
+$('sidebar-resize').onkeydown=event=>{if(['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();event.stopPropagation();applySidebarWidth(sidebarWidth+(event.key==='ArrowRight'?20:-20),true);}};
+$('sidebar-resize').ondblclick=()=>applySidebarWidth(320,true);
+$('storage-mode').onchange=event=>{assetCache.setMode(event.target.value);warmStorage();};
+async function warmStorage(){
+  if(!state.manifest)return;
+  if(assetCache.enabled)await assetCache.write(`${assetCache.scope}:catalog`,new Blob([JSON.stringify(state.manifest)],{type:'application/json'}));
+  await assetCache.warm(state.manifest,dataBase);
+}
+function storageSize(bytes){return (bytes/1048576).toFixed(1)+' MB';}
+function updateStorageSizes(){
+  const maps=state.manifest.maps,sizes=maps.map(map=>map.bytes||0),current=maps.find(map=>map.id===assetCache.currentMap);
+  const range=storageSize(Math.min(...sizes))+' to '+storageSize(Math.max(...sizes));
+  const all=storageSize(sizes.reduce((a,b)=>a+b,0));
+  $('storage-all-size').textContent=all+' for all '+maps.length+' maps';
+  $('storage-current-size').textContent=(current?storageSize(current.bytes)+' for '+current.name+'; ':'')+range+' depending on the map';
+  $('storage-size').textContent='All maps: '+all+'. Current map only: '+(current?storageSize(current.bytes)+' now; ':'')+range+' when switching maps. Estimates exclude a small browser storage overhead.';
+}
+async function chooseStorage(){
+  updateStorageSizes();if(assetCache.mode)return;
+  const dialog=$('storage-dialog');dialog.addEventListener('cancel',event=>event.preventDefault());
+  await new Promise(resolve=>{for(const button of dialog.querySelectorAll('[data-storage-mode]'))button.onclick=()=>{assetCache.setMode(button.dataset.storageMode);$('storage-mode').value=assetCache.mode;dialog.close();resolve();};dialog.showModal();});
+}
+
+async function json(url, signal) {
+  if(url==='manifest.json')return assetCache.catalog(new URL(url,base));
+  const blob=await assetCache.get(new URL(url,dataBase),url);
+  if(signal?.aborted)throw new DOMException('Map changed','AbortError');
+  return JSON.parse(await blob.text());
+}
+
+function setLoading(message,show=true,progress=null){$('loading').hidden=!show;$('loading-message').textContent=message;if(progress===null)$('loading-progress').removeAttribute('value');else{$('loading-progress').max=1;$('loading-progress').value=progress;}}
+function requestReadyRedraw(){if(loadingStation)return;if([...frameImages].every(key=>images.get(key)?.ready||failures.has(key)))redraw();}
+function ensureImage(url){
+  if(images.has(url))return images.get(url);
+  const entry={ready:false,image:null,generation:state.generation};entry.promise=new Promise(resolve=>entry.resolve=resolve);
+  images.set(url,entry);queue.push({url,entry});drain();return entry;
+}
+
+function image(url) {
+  frameImages.add(url);
+  if (failures.has(url)) return null;
+  const cached = images.get(url);
+  if (cached) {
+    images.delete(url); images.set(url, cached);
+    return cached.ready ? cached.image : null;
+  }
+  ensureImage(url);
+  return null;
+}
+function drain() {
+  while (activeRequests < MAX_REQUESTS && queue.length) {
+    const { url, entry } = queue.shift();
+    if (entry.generation !== state.generation) { images.delete(url);entry.resolve(null);continue; }
+    activeRequests++;
+    const img = new Image();
+    img.onload = () => {
+      activeRequests--; entry.image = img; entry.ready = true;
+      URL.revokeObjectURL(img.src);entry.resolve(img);drain();requestReadyRedraw();
+    };
+    img.onerror = () => {
+      activeRequests--; failures.add(url); images.delete(url); drain();
+      URL.revokeObjectURL(img.src);entry.resolve(null);$('coords').textContent = 'Some image chunks failed · reload to retry';requestReadyRedraw();
+    };
+    assetCache.get(new URL(url,dataBase),url).then(blob=>{img.src=URL.createObjectURL(blob);}).catch(()=>img.onerror());
+  }
+}
+function trimImages() {
+  let bytes = 0;
+  for (const entry of images.values()) if (entry.ready) bytes += entry.image.naturalWidth * entry.image.naturalHeight * 4;
+  for (const [key, entry] of images) {
+    if (bytes <= CACHE_BYTES) break;
+    // Protect this viewport's images: changing detail to satisfy a tile-count
+    // budget caused the old border-dependent pixelation and cache churn.
+    if (entry.ready && !frameImages.has(key)&&!warmImages.has(key)&&!key.endsWith('-overview.webp')) {
+      bytes -= entry.image.naturalWidth * entry.image.naturalHeight * 4; images.delete(key);
+    }
+  }
+}
+
+for (const [key, color] of Object.entries(palette)) {
+  const label = document.createElement('label'); label.className = 'toggle-row';
+  label.innerHTML = `<span>${networkNames[key]}</span><input type="checkbox" aria-label="${networkNames[key]}">`;
+  label.querySelector('input').onchange = event => { event.target.checked ? enabled.add(key) : enabled.delete(key); redraw(); };
+  label.querySelector('input').checked=enabled.has(key);
+  label.querySelector('input').id=key;
+  $('network-controls').append(label);
+}
+
+const backgroundPlanes = [0, 1, 2].map(plane => {
+  const tile = document.createElement('canvas'); tile.width = tile.height = 1024;
+  const c = tile.getContext('2d');
+  let seed = 4129 + plane * 923;
+  const rand = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let i = 0; i < 180 - plane * 40; i++) {
+    const x = rand() * 1024, y = rand() * 1024, r = rand() > .96 ? 1.6 : .4 + rand() * .5;
+    c.fillStyle = `rgba(${plane === 2 ? '222,189,140' : '150,189,212'},${.15 + rand() * .6})`;
+    c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+  }
+  return tile;
+});
+
+function drawBackground() {
+  const ctx = background;
+  ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+  ctx.fillStyle = '#081522'; ctx.fillRect(0, 0, state.w, state.h);
+  const offset = state.motion ? 1 : 0;
+  const gx = state.w * (.6 + Math.sin(spaceTime / 95) * .15) - state.x * .018 * offset;
+  const gy = state.h * (.45 + Math.cos(spaceTime / 120) * .15) - state.y * .018 * offset;
+  const nebula = ctx.createRadialGradient(gx, gy, 0, gx, gy, Math.max(state.w, state.h));
+  nebula.addColorStop(0, '#163340'); nebula.addColorStop(.4, '#102434'); nebula.addColorStop(1, '#09101e');
+  ctx.fillStyle = nebula; ctx.fillRect(0, 0, state.w, state.h);
+  for (let p = 0; p < 3; p++) {
+    const dx = ((-state.x * (.025 + p * .03) * offset + spaceTime * (3 + p * 4)) % 1024 + 1024) % 1024;
+    const dy = ((-state.y * (.025 + p * .03) * offset + spaceTime * (1 + p * 1.4)) % 1024 + 1024) % 1024;
+    for (let x = dx - 1024; x < state.w; x += 1024) for (let y = dy - 1024; y < state.h; y += 1024) ctx.drawImage(backgroundPlanes[p], x, y);
+  }
+}
+function animateSpace(timestamp) {
+  spaceFrame = 0;
+  if (!state.motion || document.hidden) { lastSpaceTime = null; return; }
+  if (lastSpaceTime !== null) spaceTime += Math.min(.1, (timestamp - lastSpaceTime) / 1000);
+  lastSpaceTime = timestamp;
+  if (timestamp - lastSpacePaint >= 1000 / 30) { drawBackground(); lastSpacePaint = timestamp; }
+  spaceFrame = requestAnimationFrame(animateSpace);
+}
+function updateSpaceAnimation() {
+  if (spaceFrame) cancelAnimationFrame(spaceFrame);
+  spaceFrame = 0; lastSpaceTime = null;
+  drawBackground();
+  if (state.motion && !document.hidden) spaceFrame = requestAnimationFrame(animateSpace);
+}
+document.addEventListener('visibilitychange', () => { updateSpaceAnimation(); updateConnectionHighlights(); });
+
+function worldTransform(target, depth = 0) {
+  // Project each deck from the same camera at a different distance. Lower
+  // decks recede and pan at their own rate, while parent aperture masks stay
+  // attached to their own deck. No saturated screen-offset approximation.
+  const scale = deckScale(state.zoom, depth, state.motion);
+  target.setTransform(state.dpr * scale, 0, 0, state.dpr * scale, state.dpr * (screenCenterX() - state.x * scale), state.dpr * (state.h / 2 - state.y * scale));
+}
+
+function channelImages(z,channel,zoom=state.zoom) {
+  const data = state.levels.get(z); if (!data) return;
+  const path = `${state.map.id}/${z}`;
+  const S = state.manifest.tilePixels, chunkSize = S * state.manifest.chunkTiles;
+  const natural=channel==='base'&&$('runtime-terrain').checked;
+  const overviewChannel=natural&&data.overviews?.includes('natural')?'natural':channel;
+  const scale = deckScale(zoom,state.z-z,state.motion), detail = detailForZoom(zoom);
+  const left = state.x - screenCenterX() / scale - S, top = state.y - state.h / scale / 2 - S;
+  const right = left + state.w / scale + S * 2, bottom = top + state.h / scale + S * 2;
+  const visible = (data.chunks[channel] || []).filter(([cx, cy]) => !((cx + 1) * chunkSize < left || cx * chunkSize > right || (cy + 1) * chunkSize < top || cy * chunkSize > bottom));
+  if (detail === 'overview' && data.overviews?.includes(channel)) {
+    return [{path:`${path}/${overviewChannel}-overview.webp`,x:0,y:0,w:state.map.width*S,h:state.map.height*S}];
+  }
+  return visible.map(([cx,cy])=>{
+    const suffix = typeof detail === 'number' && detail > 0 && data.mips?.includes(detail) ? `-mip${detail}` : '';
+    const prefix=natural&&data.chunks.natural?.some(([x,y])=>x===cx&&y===cy)?'natural':channel;
+    return {path:`${path}/${prefix}-${cx}-${cy}${suffix}.webp`,x:cx*chunkSize,y:cy*chunkSize,w:chunkSize,h:chunkSize};
+  });
+}
+function drawChannel(target,z,channel,depth){
+  const desired=channelImages(z,channel)||[];if(!desired.length)return;
+  worldTransform(target,depth);target.imageSmoothingEnabled=false;
+  const loaded=desired.map(item=>({...item,image:image(item.path)}));
+  let chosen=loaded.every(item=>item.image)?loaded:null;
+  if(!chosen)for(const zoom of [state.zoom/2,state.zoom/4,.01]){
+    const fallback=(channelImages(z,channel,zoom)||[]).map(item=>({...item,image:images.get(item.path)?.image}));
+    if(fallback.length&&fallback.every(item=>item.image)){chosen=fallback;break;}
+  }
+  if(!chosen){const path=`${state.map.id}/${z}/${channel}-overview.webp`;if(state.levels.get(z).overviews?.includes(channel))image(path);return;}
+  for(const item of chosen){frameImages.add(item.path);target.drawImage(item.image,item.x,item.y,item.w,item.h);}
+}
+async function prepareView(generation){
+  const paths=new Set();
+  for(const z of state.map.levels){
+    const data=state.levels.get(z);
+    for(const channel of data.overviews||[])paths.add(`${state.map.id}/${z}/${channel}-overview.webp`);
+    if(z>state.z)continue;
+    for(const zoom of [state.zoom,state.zoom/1.5,state.zoom/2,state.zoom*1.5]){
+      for(const channel of ['base',...(z===state.z?[...enabled]:[])])for(const item of channelImages(z,channel,zoom)||[])paths.add(item.path);
+    }
+  }
+  warmImages=paths;let count=0;
+  await Promise.all([...paths].map(async path=>{await ensureImage(path).promise;if(generation===state.generation)setLoading(`Preparing smooth zoom · ${++count} / ${paths.size} images`,true,count/paths.size);}));
+}
+
+function render() {
+  frame = 0;
+  canvas.dataset.detail=String(detailForZoom(state.zoom));
+  frameImages = new Set();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over';
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawBackground();
+  updateConnectionHighlights();
+  if (!state.map||!state.ready) return;
+  const levels = state.map.levels.filter(z => z <= state.z && (state.cutaway || z === state.z));
+  sc.setTransform(1, 0, 0, 1, 0, 0); sc.clearRect(0, 0, scratch.width, scratch.height);
+  for (const z of levels) {
+    lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, layer.width, layer.height);
+    drawChannel(lc, z, 'base', state.z - z);
+    if (z === state.z) for (const channel of enabled) if(!($('simple-utilities').checked&&state.map.infrastructure?.nodes?.length&&['power','pipes'].includes(channel)))drawChannel(lc, z, channel, 0);
+    if (z !== state.z) {
+      // Shade deeper decks without changing their opacity: an opaque middle
+      // floor must still occlude deeper floors. Preserve transparent sprite
+      // edges instead of cutting an entire 32px cell out of the lower deck.
+      lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalCompositeOperation = 'source-atop';
+      lc.fillStyle = `rgba(5,12,22,${Math.min(.45, (state.z - z) * .14)})`;
+      lc.fillRect(0, 0, layer.width, layer.height); lc.globalCompositeOperation = 'source-over';
+    }
+    sc.setTransform(1, 0, 0, 1, 0, 0); sc.drawImage(layer, 0, 0);
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(scratch, 0, 0);
+  drawInfrastructure();
+  drawAnnotations();
+  trimImages();
+  const tileWidth = 32 * state.zoom;
+  $('scale').textContent = `${Math.max(1, Math.round(70 / tileWidth))} tiles / ${Math.round(state.zoom * 100)}%`;
+  if (!reduced.matches && performance.now() - pulseStart < 1400) redraw();
+}
+function drawInfrastructure(){
+  const data=state.map.infrastructure;if(!data)return;
+  worldTransform(ctx);const simple=$('simple-utilities').checked,colored=$('power-networks').checked;
+  if(simple||colored){
+    const key=`${state.z}:${simple}:${colored}:${[...enabled].sort()}`;
+    if(!utilityPaths.has(key)){
+      const paths=new Map();
+      for(const node of data.nodes){if(node.z!==state.z||!enabled.has(node.channel)||(!simple&&!(colored&&node.channel==='power')))continue;
+        const color=colored&&node.channel==='power'?`hsl(${node.network*137.508%360} 85% 70%)`:node.color;
+        if(!paths.has(color))paths.set(color,new Path2D());const path=paths.get(color),x=(node.x-.5)*32,y=(state.map.height-node.y+.5)*32;
+        const ports=simple?15:node.links;
+        for(const [dir,dx,dy]of[[1,0,-1],[2,0,1],[4,1,0],[8,-1,0]])if(ports&dir){path.moveTo(x,y);path.lineTo(x+dx*16,y+dy*16);}
+        if(!ports){path.moveTo(x-3,y);path.lineTo(x+3,y);}
+      }
+      utilityPaths.set(key,paths);
+    }
+    ctx.lineCap='round';for(const [color,path]of utilityPaths.get(key)){ctx.strokeStyle='#0c1729';ctx.lineWidth=5;ctx.stroke(path);ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.stroke(path);}ctx.lineCap='butt';
+  }
+}
+
+// Animate only this transparent overlay; the station's cached canvas stays idle.
+function drawConnectionHighlights(time = performance.now()) {
+  const target = connectionsContext;
+  target.setTransform(1, 0, 0, 1, 0, 0);
+  target.clearRect(0, 0, connectionsCanvas.width, connectionsCanvas.height);
+  if (!state.ready || !state.map || !$('connections').checked || document.hidden) return false;
+  worldTransform(target);
+  const pulse = reduced.matches ? .5 : (1 + Math.sin(time * Math.PI * 2 / 1800)) / 2;
+  let visible = false;
+  for (const link of state.map.infrastructure?.transitions || []) {
+    if (link.z !== state.z) continue;
+    const x = (link.x - .5) * 32, y = (state.map.height - link.y + .5) * 32;
+    const screenX = (x - state.x) * state.zoom + screenCenterX(), screenY = (y - state.y) * state.zoom + state.h / 2;
+    if (screenX < -400 || screenX > state.w + 30 || screenY < -30 || screenY > state.h + 30) continue;
+    visible = true;
+    const radius = Math.max(13, 5 / state.zoom) + pulse * 3 / state.zoom;
+    target.strokeStyle = `rgba(177,232,255,${.65 + pulse * .35})`;
+    target.fillStyle = `rgba(118,201,237,${.12 + pulse * .18})`;
+    target.lineWidth = 2 / state.zoom;
+    target.beginPath(); target.arc(x, y, radius, 0, Math.PI * 2); target.fill(); target.stroke();
+    if ($('connection-labels').checked) {
+      const up = link.targets.some(t => t.z > link.z), down = link.targets.some(t => t.z < link.z);
+      if (!up && !down) continue;
+      const size = Math.min(10, Math.max(3, state.zoom * 10)) / state.zoom;
+      const arrow = new Path2D();
+      arrow.moveTo(x, y - size); arrow.lineTo(x, y + size);
+      if (up) { arrow.moveTo(x - size * .55, y - size * .4); arrow.lineTo(x, y - size); arrow.lineTo(x + size * .55, y - size * .4); }
+      if (down) { arrow.moveTo(x - size * .55, y + size * .4); arrow.lineTo(x, y + size); arrow.lineTo(x + size * .55, y + size * .4); }
+      target.lineJoin = 'round'; target.lineCap = 'round';
+      target.strokeStyle = '#09131f'; target.lineWidth = 5 / state.zoom; target.stroke(arrow);
+      target.strokeStyle = '#d2f0ff'; target.lineWidth = 2 / state.zoom; target.stroke(arrow);
+      target.lineCap = 'butt'; target.lineJoin = 'miter';
+    }
+  }
+  return visible;
+}
+function animateConnections(time) {
+  connectionsFrame = 0;
+  if (time - lastConnectionsPaint >= 1000 / 30) {
+    lastConnectionsPaint = time;
+    if (!drawConnectionHighlights(time) || reduced.matches) return;
+  }
+  connectionsFrame = requestAnimationFrame(animateConnections);
+}
+function updateConnectionHighlights() {
+  if (connectionsFrame) cancelAnimationFrame(connectionsFrame);
+  connectionsFrame = 0;
+  if (drawConnectionHighlights() && !reduced.matches) connectionsFrame = requestAnimationFrame(animateConnections);
+}
+
+function regionColor(area) {
+  let hash = 0; for (const c of area) hash = (hash * 31 + c.charCodeAt(0)) | 0;
+  return `hsl(${Math.abs(hash) % 360} 48% 64%)`;
+}
+
+function drawAnnotations() {
+  const map = state.map, data = state.levels.get(state.z); if (!data) return;
+  worldTransform(ctx); ctx.lineWidth = 1 / state.zoom;
+  const left = Math.max(0, Math.floor((state.x - screenCenterX() / state.zoom) / 32));
+  const top = Math.max(0, Math.floor((state.y - state.h / state.zoom / 2) / 32));
+  const right = Math.min(map.width, Math.ceil((state.x + (state.w - screenCenterX()) / state.zoom) / 32));
+  const bottom = Math.min(map.height, Math.ceil((state.y + state.h / state.zoom / 2) / 32));
+  if (state.regions) {
+    const labels = new Map();
+    for (let y = top; y < bottom; y++) for (let x = left; x < right; x++) {
+      const def = map.definitions[data.grid[y * map.width + x]]; if (!def || def.turf.includes('/space')) continue;
+      const area = map.areas[def.area], color = regionColor(area.path);
+      ctx.globalAlpha = .14; ctx.fillStyle = color; ctx.fillRect(x * 32, y * 32, 32, 32); ctx.globalAlpha = .8; ctx.strokeStyle = color;
+      for (const [dx, dy] of [[1, 0], [0, 1]]) {
+        const neighbor = map.definitions[data.grid[(y + dy) * map.width + x + dx]];
+        if (neighbor?.area !== def.area) { ctx.beginPath(); ctx.moveTo((x + dx) * 32, (y + dy) * 32); ctx.lineTo((x + 1) * 32, (y + 1) * 32); ctx.stroke(); }
+      }
+      if (!labels.has(def.area)) labels.set(def.area, [x, y]);
+    }
+    ctx.globalAlpha = 1;
+    if (state.zoom > .55) for (const [area, [x, y]] of labels) {
+      ctx.font = `${10 / state.zoom}px 'IBM Plex Mono',monospace`; ctx.fillStyle = '#eff4ee'; ctx.strokeStyle = '#0c1824'; ctx.lineWidth = 3 / state.zoom;
+      const label = map.areas[area].name; ctx.strokeText(label, x * 32 + 8, y * 32 + 18); ctx.fillText(label, x * 32 + 8, y * 32 + 18);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#ffcf72'; ctx.fillStyle = '#f4c36d55'; ctx.lineWidth = 2 / state.zoom;
+  for (let p = 0; p < state.markers.length; p += 3) {
+    const [x, y, z] = state.markers.slice(p, p + 3); if (z !== state.z) continue;
+    const px = (x - .5) * 32, py = (map.height - y + .5) * 32;
+    if (px < left * 32 || px > right * 32 || py < top * 32 || py > bottom * 32) continue;
+    ctx.beginPath(); ctx.arc(px, py, Math.max(13, 4 / state.zoom), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  if (state.selected?.z === state.z) {
+    const elapsed = performance.now() - pulseStart;
+    const pulse = !reduced.matches && elapsed < 1400 ? .5 + Math.sin(elapsed / 75) * .5 : 0;
+    const x = (state.selected.x - 1) * 32, y = (map.height - state.selected.y) * 32;
+    ctx.fillStyle = `rgba(255,210,115,${pulse * .3})`; ctx.fillRect(x, y, 32, 32);
+    ctx.strokeStyle = '#fff4d8'; ctx.strokeRect(x, y, 32, 32);
+  }
+}
+
+function resize() {
+  const rect = canvas.getBoundingClientRect(); state.w = rect.width; state.h = rect.height; state.dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = scratch.width = layer.width = Math.round(state.w * state.dpr);
+  canvas.height = scratch.height = layer.height = Math.round(state.h * state.dpr);
+  space.width = connectionsCanvas.width = canvas.width; space.height = connectionsCanvas.height = canvas.height;
+  // ResizeObserver runs before paint. Repaint synchronously so resizing never
+  // presents a freshly cleared canvas for one frame.
+  updateSpaceAnimation(); if (frame) cancelAnimationFrame(frame); render();
+}
+new ResizeObserver(resize).observe(canvas);
+function fit() {
+  if (!state.map) return;
+  const map = state.map, grid = state.levels.get(state.z)?.grid;
+  let minX = map.width, minY = map.height, maxX = 0, maxY = 0;
+  if (grid) for (let y = 0; y < map.height; y++) for (let x = 0; x < map.width; x++) {
+    const def = map.definitions[grid[y * map.width + x]];
+    if (def && !/\/space(?:\/|$)|\/openspace/.test(def.turf)) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x + 1); maxY = Math.max(maxY, y + 1); }
+  }
+  if (maxX <= minX) { minX = minY = 0; maxX = map.width; maxY = map.height; }
+  state.x = (minX + maxX) * 16; state.y = (minY + maxY) * 16;
+  state.zoom = Math.max(.05, Math.min((state.w - sidebarInset() - 130) / ((maxX - minX) * 32), (state.h - 180) / ((maxY - minY) * 32), 1));
+  redraw(); share();
+}
+function zoom(factor, sx = screenCenterX(), sy = state.h / 2) {
+  const before = state.zoom, after = Math.min(5, Math.max(.04, before * factor));
+  state.x += (sx - screenCenterX()) * (1 / before - 1 / after); state.y += (sy - state.h / 2) * (1 / before - 1 / after); state.zoom = after;
+  redraw(); share();
+}
+function share() {
+  clearTimeout(shareTimer); shareTimer = setTimeout(() => {
+    state.optionMask=encodeOptions(Object.fromEntries(Object.keys(optionBits).map(key=>[key,$(key).checked])));
+    if(!state.map){history.replaceState(null,'',`#o=${state.optionMask}`);return;}
+    history.replaceState(null, '', viewFragment(state));
+  }, 150);
+}
+function restoreOptions(params){
+  if(!params.has('o'))return false;const options=decodeOptions(params.get('o'));if(!options)return false;
+  for(const [key,value]of Object.entries(options))$(key).checked=value;
+  for(const key of ['pipes','power','disposal','transit'])options[key]?enabled.add(key):enabled.delete(key);
+  for(const key of ['regions','cutaway','motion'])state[key]=options[key];
+  updateSpaceAnimation();utilityPaths.clear();return true;
+}
+let loadAbort;
+async function loadStation(id, restore = false) {
+  const generation = ++state.generation;
+  assetCache.setCurrentMap(id);updateStorageSizes();
+  state.ready=false;loadingStation=true;assetCache.foregroundBusy=true;assetCache.activeView=true;warmImages=new Set();utilityPaths.clear();canvas.style.pointerEvents='none';$('map-picker').hidden=true;
+  document.querySelector('.floating-decks').hidden=false;document.querySelector('.map-tools').hidden=false;
+  finding = null; locationSeq++; $('search-findings').hidden = true;
+  const params = new URLSearchParams(location.hash.slice(1));if(restore)restoreOptions(params);
+  const restoreTarget = restore && params.get('r') ? { id: params.get('r'), index: Math.max(0, (Number(params.get('f')) || 1) - 1), tile: params.get('t') } : null;
+  state.result = null; state.finding = null; locationTarget = null;
+  $('search').value = state.query = restore ? params.get('q') || '' : $('search').value;
+  state.placed = $('placed').checked; state.possible = $('possible').checked;
+  loadAbort?.abort(); loadAbort = new AbortController();
+  state.map = null; state.levels.clear(); state.markers = []; state.selected = null; images.clear();for(const pending of queue)pending.entry.resolve(null);queue.length=0; failures.clear();
+  $('inspect-tab').disabled = true; sidebarView(false);
+  $('loading').classList.remove('error');setLoading('Reading station archive…');
+  $('results').replaceChildren(); state.searchReady = false; $('search-status').textContent = 'Preparing search index…';
+  $('search').disabled=true;
+  try {
+    const signal = loadAbort.signal, meta = await json(`${id}/map.json`, signal);
+    const levelData = await Promise.all(meta.levels.map(z => json(`${id}/${z}.json`, signal)));
+    if (generation !== state.generation) return;
+    state.map = meta; state.levels = new Map(levelData.map(level => [level.z, level]));
+    $('network-summary').textContent=meta.infrastructure?`${meta.infrastructure.powerNetworks} separate mapped power networks. Colors describe wired connectivity before a round starts.`:'';
+    const requestedZ = restore ? +params.get('z') : meta.levels.at(-1);
+    state.z = meta.levels.includes(requestedZ) ? requestedZ : meta.levels.at(-1);
+    $('map-title').textContent = meta.name;
+    $('map-subtitle').textContent = `${meta.levels.length} ${meta.levels.length === 1 ? 'deck' : 'decks'} · ${meta.areas.length} mapped areas · pre-round snapshot`;
+    $('station-meta').textContent = `${meta.width} × ${meta.height} GRID / ${meta.levels.length} Z-LEVEL${meta.levels.length === 1 ? '' : 'S'}`;
+    $('decks').replaceChildren();
+    for (const z of [...meta.levels].reverse()) {
+      const button = document.createElement('button'); button.textContent = `Z${String(z).padStart(2, '0')}`; button.onclick = () => setDeck(z); button.dataset.z = z; button.setAttribute('aria-label', `Deck ${z}`); $('decks').append(button);
+    }
+    setDeck(state.z); fit();
+    if (restore && ['x', 'y', 's'].every(k => params.has(k) && Number.isFinite(+params.get(k)))) {
+      state.x = Math.max(0, Math.min(meta.width * 32, +params.get('x'))); state.y = Math.max(0, Math.min(meta.height * 32, +params.get('y'))); state.zoom = Math.max(.04, Math.min(5, +params.get('s'))); redraw();
+    }
+    const tile = restore ? selectedTile(params, meta) : null;
+    if (tile) { if (state.z !== tile.z) setDeck(tile.z); inspect(tile.x, tile.y, tile.z); }
+    const restoreVersion = locationSeq;
+    let resolveIndex;const indexReady=new Promise(resolve=>resolveIndex=resolve);
+    worker?.terminate(); worker = new Worker(new URL('./search.worker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = ({ data }) => {
+      if (generation !== state.generation) return;
+      if (data.type === 'ready') {
+        state.searchReady = true; $('search-status').textContent = 'Search rooms, mapped items & loot candidates'; runSearch();
+        resolveIndex();if(state.selected)worker.postMessage({type:'tile',tile:`${state.selected.x},${state.selected.y},${state.selected.z}`,seq:++tileSeq});
+        if (restoreTarget && restoreVersion === locationSeq) { locationTarget = restoreTarget; worker.postMessage({ type: 'locations', id: restoreTarget.id, seq: ++locationSeq }); }
+      }
+      if (data.type === 'error') { $('search-status').textContent = data.message;resolveIndex(); }
+      if(data.type==='tile'&&data.seq===tileSeq){tileCandidates=data.possible;paintInspector();}
+      if (data.type === 'results' && data.seq === searchSeq) showResults(data);
+      if (data.type === 'locations' && data.seq === locationSeq && data.result) {
+        const restoring = !!locationTarget;
+        finding = data.result;
+        let index = 0;
+        for (let p = 0; p < finding.points.length; p += 3) if (finding.points[p + 2] === state.z) { index = p / 3; break; }
+        if (locationTarget) {
+          index = Math.min(finding.count - 1, Math.floor(locationTarget.index));
+          if (locationTarget.tile) for (let p = 0; p < finding.points.length; p += 3) if (finding.points.slice(p, p + 3).join(',') === locationTarget.tile) { index = p / 3; break; }
+          locationTarget = null;
+        }
+        selectFinding(index, { focus: !restoring });
+      }
+    };
+    const searchItems=await json(`${id}/search.json`,signal);if(generation!==state.generation)return;
+    worker.postMessage({ type: 'init', items:searchItems, generation, rooms: meta.rooms || [] });
+    await Promise.all([prepareView(generation),indexReady]);if(generation!==state.generation)return;
+    state.ready=true;loadingStation=false;assetCache.foregroundBusy=false;canvas.style.pointerEvents='';setLoading('',false);$('source-status').textContent = 'ARCHIVE READY';redraw();
+    $('search').disabled=false;for(const button of $('results').children)button.disabled=false;
+    warmStorage();
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    loadingStation=false;assetCache.foregroundBusy=false;$('loading').classList.add('error');setLoading(`Could not load station: ${error.message}. Run pnpm source && pnpm export, then reload.`);
+  }
+}
+function setDeck(z) {
+  state.z = z;
+  if (state.selected && state.selected.z !== z) clearSelection();
+  for (const button of $('decks').children) { button.classList.toggle('active', +button.dataset.z === z); button.setAttribute('aria-pressed', +button.dataset.z === z); }
+  $('coords').textContent = `DECK ${z} / DRAG TO EXPLORE`; redraw(); share();
+}
+
+function runSearch() {
+  searchSeq++;
+  state.query = $('search').value; state.placed = $('placed').checked; state.possible = $('possible').checked; share();
+  if (!state.searchReady) return;
+  const query = $('search').value.trim();
+  if (!query) { $('results').replaceChildren(); $('search-status').textContent = 'Search rooms, mapped items & loot candidates'; return; }
+  worker.postMessage({ type: 'query', seq: searchSeq, query, placed: $('placed').checked, possible: $('possible').checked });
+}
+function showResults(data) {
+  $('results').replaceChildren(); $('search-status').textContent = `${data.total} matches${data.total > 70 ? ' · showing first 70' : ''}`;
+  for (const result of data.results) {
+    const button = document.createElement('button'); button.className = 'result';
+    button.disabled=loadingStation;
+    button.innerHTML = `${escape(result.name)}<small>${escape(result.kind.toUpperCase())} · ${result.count} ${result.kind === 'room' ? 'decks' : 'locations'}</small>`;
+    button.onclick = () => {
+      locationTarget = null;
+      worker.postMessage({ type: 'locations', id: result.id, seq: ++locationSeq });
+    };
+    $('results').append(button);
+  }
+}
+function selectFinding(index, { focus = true } = {}) {
+  if (!finding || index < 0 || index >= finding.count) return;
+  // setDeck can clear a previous tile selection; retain the finding group.
+  const result = finding, [x, y, z] = result.points.slice(index * 3, index * 3 + 3);
+  setDeck(z); finding = result; state.markers = result.points;
+  findingIndex = index; findingPage = Math.floor(index / FINDINGS_PER_PAGE);
+  state.result = result.id; state.finding = index;
+  if (focus) { state.x = (x - .5) * 32; state.y = (state.map.height - y + .5) * 32; state.zoom = Math.max(state.zoom, 1); }
+  inspect(x, y, z, result); showFindings(); redraw(); share();
+}
+function showFindings() {
+  const panel = $('search-findings');
+  if (!finding) { panel.hidden = true; return; }
+  const start = findingPage * FINDINGS_PER_PAGE, end = Math.min(finding.count, start + FINDINGS_PER_PAGE);
+  panel.innerHTML = `<button class="back-to-search">← Search results</button><h2>${escape(finding.name)}</h2><p>${escape(finding.kind.toUpperCase())} · ${finding.count} findings</p><div class="finding-list"></div><div class="finding-pages"><button class="previous" ${start === 0 ? 'disabled' : ''} aria-label="Previous findings">←</button><span>${start + 1}–${end} / ${finding.count}</span><button class="next" ${end >= finding.count ? 'disabled' : ''} aria-label="Next findings">→</button></div>`;
+  for (let index = start; index < end; index++) {
+    const [x, y, z] = finding.points.slice(index * 3, index * 3 + 3);
+    const def = state.map.definitions[state.levels.get(z)?.grid[(state.map.height - y) * state.map.width + x - 1]];
+    const button = document.createElement('button'); button.className = 'finding-location'; button.dataset.index = index;
+    button.setAttribute('aria-pressed', String(index === findingIndex));
+    button.innerHTML = `<span>${index + 1}. ${escape(def ? state.map.areas[def.area].name : 'Unknown area')}</span><small>Z${z} · X ${x} / Y ${y}</small>`;
+    button.onclick = () => selectFinding(index); panel.querySelector('.finding-list').append(button);
+  }
+  panel.querySelector('.back-to-search').onclick = () => sidebarView('search');
+  panel.querySelector('.previous').onclick = () => { findingPage--; showFindings(); };
+  panel.querySelector('.next').onclick = () => { findingPage++; showFindings(); };
+  panel.hidden = false;
+}
+function inspect(x, y, z = state.z, result = null) {
+  if (!state.map) return;
+  const meta = state.map, def = meta.definitions[state.levels.get(z)?.grid[(meta.height - y) * meta.width + x - 1]];
+  if (!def || x < 1 || x > meta.width || y < 1 || y > meta.height) return;
+  const area = meta.areas[def.area]; state.selected = { x, y, z };
+  if (!result) { finding = null; state.markers = []; state.result = null; state.finding = null; locationSeq++; $('search-findings').hidden = true; }
+  pulseStart = performance.now();
+  const contents = def.atoms.filter(a => !a.path.startsWith('/turf/'));
+  if (result?.kind === 'possible') result = { ...result, spawner: contents.find(atom => result.spawners?.includes(atom.path))?.path || result.spawners?.[0] || 'a static loot table' };
+  const sourceUrl = path => `${state.manifest.repository.replace(/\.git$/, '')}/blob/${state.manifest.commit}/${path}`;
+  $('inspector').innerHTML = `<button class="close" aria-label="Close inspector">×</button><span class="tiny-label">TILE INSPECTOR / Z${z}</span><h3>${escape(area.name)}</h3><p>${escape(area.region.toUpperCase())} · X ${x} / Y ${y}<br>${escape(area.path)}</p>${result ? `<p><strong>${escape(result.name)}</strong><br>${result.kind === 'possible' ? 'Candidate from ' + escape(result.spawner) + '. No probability is inferred.' : escape(result.kind) + ' source location'}</p>` : ''}<p>${def.aperture ? 'Lower-deck visibility: ' + Math.round(def.aperture / 255 * 100) + '% · ' : ''}${escape(def.turf)}</p><details open><summary>${contents.length} mapped objects</summary><ul>${contents.map(a => `<li>${escape(a.name)}${a.network ? ` <span style="color:${palette[a.network]}">[${escape(networkNames[a.network])}]</span>` : ''}<details><summary>Type & overrides</summary><p>${escape(a.path)}<br>${escape(JSON.stringify(a.vars))}${a.source ? `<br><a href="${escape(sourceUrl(a.source))}" target="_blank" rel="noreferrer">DM declaration ↗</a>` : ''}</p></details></li>`).join('')}</ul></details><p>Utility sprites show mapped infrastructure. They do not simulate live connectivity, pressure or power.</p><a href="${escape(sourceUrl(meta.files[0]))}" target="_blank" rel="noreferrer">View map source ↗</a>`;
+  $('inspect-tab').disabled = false; sidebar(false); sidebarView(true);
+  inspectorDetailHTML=$('inspector').innerHTML;inspectedResult=result;tileCandidates=[];paintInspector();
+  if(state.searchReady)worker.postMessage({type:'tile',tile:`${x},${y},${z}`,seq:++tileSeq});
+  $('inspector').querySelector('.close').onclick = clearSelection;
+  redraw(); share();
+}
+
+function paintInspector(){
+  if(!state.selected||!state.map)return;
+  const {x,y,z}=state.selected,meta=state.map,def=meta.definitions[state.levels.get(z)?.grid[(meta.height-y)*meta.width+x-1]];if(!def)return;
+  if($('detailed-view').checked){$('inspector').innerHTML=inspectorDetailHTML;}
+  else{
+    const area=meta.areas[def.area],turf=def.atoms.find(a=>a.path.startsWith('/turf/'));
+    const clean=text=>String(text||'').replace(/<[^>]*>/g,'').replace(/\\[a-z]+\s*/g,'').replace(/\[[^\]]*\]/g,'').trim();
+    const here=def.atoms.filter(a=>/^\/(obj|mob)\//.test(a.path)&&!a.path.startsWith('/obj/effect/')&&!a.path.includes('/spawner/'));
+    const list=items=>{const counts=new Map();for(const item of items){const name=clean(item.name);if(name)counts.set(name,(counts.get(name)||0)+1);}return [...counts].sort(([a],[b])=>a.localeCompare(b)).map(([name,count])=>`<li>${escape(name)}${count>1?` × ${count}`:''}</li>`).join('');};
+    const links=(meta.infrastructure?.transitions||[]).filter(t=>t.x===x&&t.y===y&&t.z===z);
+    const cables=(meta.infrastructure?.nodes||[]).filter(n=>n.channel==='power'&&n.x===x&&n.y===y&&n.z===z);
+    const shownTurf=$('runtime-terrain').checked&&def.runtimeTerrain?def.runtimeTerrain:turf;
+    const random=!!def.runtimeTerrain||def.atoms.some(a=>a.path.includes('/spawner/')||a.path.includes('/random'));
+    $('inspector').innerHTML=`<button class="close" aria-label="Close inspector">×</button><span class="tiny-label">DECK ${z} · ${x}, ${y}</span><h3>${escape(area.name)}</h3><p class="friendly-description">${escape(clean(shownTurf?.name)||'Station surface')}${clean(shownTurf?.description)?`. ${escape(clean(shownTurf.description))}`:''}</p>${inspectedResult?`<p class="friendly-description">Selected finding: <strong>${escape(inspectedResult.name)}</strong></p>`:''}<h4 class="info-heading">What’s here</h4>${here.length?`<ul class="friendly-list">${list(here)}</ul>`:'<p class="info-empty">No objects are placed on this tile.</p>'}<h4 class="info-heading">What could appear</h4>${tileCandidates.length?`<p class="friendly-description">One or more of these may be chosen when the round begins.</p><ul class="friendly-list">${list(tileCandidates)}</ul>`:`<p class="info-empty">${random?'Random objects may appear here. Their exact contents are decided when the round starts.':'No random item spawns are recorded here.'}</p>`}${cables.length?`<h4 class="info-heading">Electricity</h4><p class="friendly-description">${[...new Set(cables.map(n=>`Power network ${n.network}`))].join(', ')}. Matching network colors indicate connected wiring.</p>`:''}${links.length?`<h4 class="info-heading">Where this leads</h4>${links.map(link=>`<p class="friendly-description">${escape(link.kind)}: ${link.targets.length?link.targets.map(t=>`Deck ${t.z} - ${escape(t.room)}`).join('; '):'No destination is mapped in this station.'}</p>`).join('')}`:''}`;
+  }
+  for(const door of def.atoms.filter(atom=>atom.doorAccess)){
+    const access=door.doorAccess,section=document.createElement('section');
+    const denied=(meta.jobRoles||[]).filter(role=>!access.roles.includes(role));
+    let allowedText,deniedText;
+    if(access.kind==='public'){
+      allowedText='Anyone can normally open this door.';deniedText='No standard crew roles are excluded.';
+    }else if(access.kind==='remote'){
+      allowedText='This door is normally opened using a button or remote controls.';deniedText='A job ID alone does not open this remotely controlled door.';
+    }else if(access.kind==='unknown'){
+      allowedText='Access is assigned dynamically and could not be determined from the map.';deniedText='Excluded roles could not be determined from the map.';
+    }else{
+      allowedText=access.roles.length?access.roles.join(', ')+'.':'No standard starting job ID is known to open this door.';
+      deniedText=meta.jobRoles?.length?(denied.length?denied.join(', ')+'.':'No standard crew roles are excluded.'):'The complete crew role list is unavailable.';
+    }
+    section.innerHTML=`<h4 class="info-heading">Who can open ${escape(door.name)}</h4><p class="friendly-description">${escape(allowedText)}</p><h4 class="info-heading">Who can NOT open ${escape(door.name)}</h4><p class="friendly-description">${escape(deniedText)}</p>${access.expandedRoles?.length?`<p class="friendly-description">With expanded departmental access, it can also open for: ${escape(access.expandedRoles.join(', '))}.</p>`:''}${access.kind==='restricted'?'<p class="helper-text">Both lists use normal starting ID access. Access granted or changed during a round can differ.</p>':''}`;
+    $('inspector').append(section);
+  }
+  if(!$('detailed-view').checked&&def.runtimeTerrain&&$('runtime-terrain').checked){const note=document.createElement('p');note.className='helper-text';note.textContent='Representative terrain preview. The exact landscape is generated when each round starts.';$('inspector').append(note);}
+  $('inspector').querySelector('.close').onclick=clearSelection;
+}
+$('detailed-view').onchange=paintInspector;
+
+const pointers = new Map(); let dragged = false, down = null, pinchDistance = 0;
+canvas.onpointerdown = event => {
+  canvas.focus(); canvas.setPointerCapture(event.pointerId); pointers.set(event.pointerId, [event.clientX, event.clientY]);
+  down = [event.clientX, event.clientY]; dragged = false;
+  if (pointers.size === 2) { const p = [...pointers.values()]; pinchDistance = Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]); dragged = true; }
+};
+canvas.onpointermove = event => {
+  const rect = canvas.getBoundingClientRect(), sx = event.clientX - rect.left, sy = event.clientY - rect.top;
+  if (state.map) {
+    const x = Math.floor((state.x + (sx - screenCenterX()) / state.zoom) / 32) + 1;
+    const y = state.map.height - Math.floor((state.y + (sy - state.h / 2) / state.zoom) / 32);
+    $('coords').textContent = `X ${x} / Y ${y} / Z ${state.z}`;
+  }
+  const previous = pointers.get(event.pointerId); if (!previous) return;
+  pointers.set(event.pointerId, [event.clientX, event.clientY]);
+  if (pointers.size === 2) {
+    const p = [...pointers.values()], distance = Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]);
+    if (pinchDistance > 0) zoom(distance / pinchDistance, (p[0][0] + p[1][0]) / 2 - rect.left, (p[0][1] + p[1][1]) / 2 - rect.top);
+    pinchDistance = distance; return;
+  }
+  if (down && Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 4) dragged = true;
+  state.x -= (event.clientX - previous[0]) / state.zoom; state.y -= (event.clientY - previous[1]) / state.zoom; redraw(); share();
+};
+canvas.onpointerup = event => {
+  pointers.delete(event.pointerId);
+  if (!dragged && !pointers.size && state.map) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((state.x + (event.clientX - rect.left - screenCenterX()) / state.zoom) / 32) + 1;
+    const y = state.map.height - Math.floor((state.y + (event.clientY - rect.top - state.h / 2) / state.zoom) / 32);
+    inspect(x, y);
+  }
+  if (!pointers.size) down = null;
+};
+canvas.onpointercancel = event => { pointers.delete(event.pointerId); dragged = true; };
+canvas.addEventListener('wheel', event => { event.preventDefault(); const rect = canvas.getBoundingClientRect(); zoom(Math.exp(-event.deltaY * .0015), event.clientX - rect.left, event.clientY - rect.top); }, { passive: false });
+canvas.ondblclick = event => { const rect = canvas.getBoundingClientRect(); zoom(1.8, event.clientX - rect.left, event.clientY - rect.top); };
+$('zoom-in').onclick = () => zoom(1.5); $('zoom-out').onclick = () => zoom(1 / 1.5); $('fit').onclick = fit;
+$('station').onchange = event => event.target.value?loadStation(event.target.value):showMapPicker();
+for (const key of ['regions', 'cutaway', 'motion']) $(key).onchange = event => { state[key] = event.target.checked; if (key === 'motion') updateSpaceAnimation(); redraw(); };
+$('search').oninput = () => { clearTimeout(timer); searchSeq++; state.query = $('search').value; share(); timer = setTimeout(runSearch, 130); };
+$('reset-search').onclick = () => {
+  clearTimeout(timer); $('search').value = ''; searchSeq++; locationSeq++;
+  locationTarget = null; finding = null; state.result = null; state.finding = null;
+  state.markers = []; inspectedResult = null; $('search-findings').hidden = true;
+  $('results').replaceChildren(); runSearch(); paintInspector(); redraw(); $('search').focus();
+};
+for (const key of ['placed', 'possible']) $(key).onchange = runSearch;
+for(const key of ['power-networks','simple-utilities','connections','connection-labels'])$(key).onchange=()=>{
+  if(key==='power-networks'&&$('power-networks').checked){enabled.add('power');document.querySelector('#network-controls input[aria-label="Power cables"]').checked=true;}
+  utilityPaths.clear();redraw();
+};
+$('runtime-terrain').onchange=()=>{if(!state.map)showMapPicker();else{paintInspector();redraw();}};
+document.onkeydown = event => {
+  if (/INPUT|SELECT|TEXTAREA/.test(event.target.tagName)) { if (event.key === 'Escape') event.target.blur(); return; }
+  if (event.key === '/') { event.preventDefault(); sidebar(false); sidebarView('search'); $('search').focus(); }
+  if (event.key.toLowerCase() === 'f') fit();
+  if (event.key === '+' || event.key === '=') zoom(1.4);
+  if (event.key === '-') zoom(1 / 1.4);
+  if (event.key === 'Escape') { if (state.selected) clearSelection(); else sidebar(true); }
+  const shifts = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  if (shifts[event.key]) { event.preventDefault(); const [x, y] = shifts[event.key]; state.x += x * 90 / state.zoom; state.y += y * 90 / state.zoom; redraw(); share(); }
+};
+window.addEventListener('hashchange', () => {
+  const params = new URLSearchParams(location.hash.slice(1)), id = params.get('m');
+  if (state.manifest?.maps.some(m => m.id === id)) { $('station').value = id; loadStation(id, true); }
+  else if(state.manifest)showMapPicker();
+});
+
+function showMapPicker(){
+  assetCache.activeView=false;
+  $('search').disabled=true;$('search-status').textContent='Choose a station to search its rooms and items.';$('results').replaceChildren();$('inspect-tab').disabled=true;state.selected=null;finding=null;sidebarView(false);
+  state.generation++;loadAbort?.abort();state.map=null;state.ready=false;loadingStation=false;assetCache.foregroundBusy=false;canvas.style.pointerEvents='';setLoading('',false);$('map-picker').hidden=false;$('station').value='';$('map-title').textContent='Choose a station';$('map-subtitle').textContent=`${state.manifest.maps.length} map configurations available`;$('station-meta').textContent='';$('source-status').textContent='ARCHIVE READY';document.querySelector('.floating-decks').hidden=true;document.querySelector('.map-tools').hidden=true;
+  history.replaceState(null,'',location.pathname+location.search+(new URLSearchParams(location.hash.slice(1)).has('o')?'#o='+encodeOptions(Object.fromEntries(Object.keys(optionBits).map(key=>[key,$(key).checked]))):''));$('map-cards').replaceChildren();
+  for(const map of state.manifest.maps){
+    const button=document.createElement('button');button.className='map-card';button.innerHTML=`${map.preview===null?'<div class="map-preview-empty">Preview unavailable</div>':'<img alt="" loading="lazy">'}<strong>${escape(map.name)}</strong><small>${map.levels.length} ${map.levels.length===1?'deck':'decks'} · ${map.width} × ${map.height} tiles</small>`;
+    button.onclick=()=>{$('station').value=map.id;loadStation(map.id);};$('map-cards').append(button);
+    if(map.preview===null)continue;
+    const path=($('runtime-terrain').checked&&map.naturalPreview)||map.preview||`${map.id}/${map.levels.at(-1)}/base-overview.webp`;
+    assetCache.get(new URL(path,dataBase),path).then(blob=>{const url=URL.createObjectURL(blob),img=button.querySelector('img');img.onload=()=>URL.revokeObjectURL(url);img.src=url;}).catch(()=>{});
+  }
+  redraw();
+}
+
+for(const key of Object.keys(optionBits))$(key).addEventListener('change',share);
+restoreOptions(new URLSearchParams(location.hash.slice(1)));
+try {
+  state.manifest = await json('manifest.json');
+  dataBase = new URL(state.manifest.dataPath || './',base);
+  assetCache.version=state.manifest.buildId||state.manifest.commit;
+  const requested=new URLSearchParams(location.hash.slice(1)).get('m');
+  if(state.manifest.maps.some(map=>map.id===requested))assetCache.setCurrentMap(requested);
+  await chooseStorage();
+  if(assetCache.enabled)await assetCache.write(`${assetCache.scope}:catalog`,new Blob([JSON.stringify(state.manifest)],{type:'application/json'}));
+  const repository = state.manifest.repository.replace(/\.git$/, '');
+  $('source-link').href = repository; $('commit-link').href = `${repository}/commit/${state.manifest.commit}`; $('commit-link').textContent = `${state.manifest.commit.slice(0, 12)} ↗`;
+  const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose a map…';$('station').append(placeholder);
+  for (const map of state.manifest.maps) { const option = document.createElement('option'); option.value = map.id; option.textContent = map.name; $('station').append(option); }
+  const params = new URLSearchParams(location.hash.slice(1)), id = params.get('m');
+  if(state.manifest.maps.some(map=>map.id===id)){$('station').value=id;await loadStation(id,true);}else showMapPicker();
+  if(!state.map)warmStorage();
+} catch (error) { $('loading').classList.add('error');setLoading(`Archive unavailable: ${error.message}. Run pnpm source && pnpm export before starting the viewer.`); }

@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/SPLURT-Station/S.P.L.U.R.T-tg.git",
+  "ref": "374be0b05b5ac1d6cf268c2fb5692a6bf7a5c8a2",
+  "maps": "all",
+  "excludeMaps": ["runtimestation_minimal", "runtimestation", "multiz_debug", "gateway_test"],
+  "chunkTiles": 16,
+  "tilePixels": 32
+}

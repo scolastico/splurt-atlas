@@ -1,0 +1,108 @@
+name: Build station atlas and deploy Pages
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 1 * *' # First day of each month, 04:23 UTC
+permissions:
+  contents: read
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  upstream:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      commit: ${{ steps.check.outputs.commit }}
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Find deployed Pages URL
+        id: pages
+        if: github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const { data } = await github.rest.repos.getPages(context.repo);
+              core.setOutput('url', data.html_url);
+            } catch (error) {
+              core.warning(`Pages URL unavailable: ${error.message}; rebuilding.`);
+            }
+      - name: Check upstream against deployed map catalog
+        id: check
+        run: node scripts/check-upstream.mjs
+        env:
+          ATLAS_DEPLOYED_URL: ${{ steps.pages.outputs.url }}
+  build:
+    needs: upstream
+    if: needs.upstream.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Pin this build to the resolved upstream commit
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const config = JSON.parse(readFileSync('atlas.config.json'));
+          config.ref = process.env.ATLAS_UPSTREAM_COMMIT;
+          writeFileSync('atlas.config.json', JSON.stringify(config, null, 2) + '\n');
+          NODE
+        env:
+          ATLAS_UPSTREAM_COMMIT: ${{ needs.upstream.outputs.commit }}
+      - name: Cache pinned upstream checkout
+        uses: actions/cache@v4
+        with:
+          path: .source
+          key: splurt-source-${{ runner.os }}-${{ needs.upstream.outputs.commit }}
+      - run: pnpm source
+      - run: pnpm test
+      - name: Convert maps and sprites
+        run: pnpm export
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+      - run: pnpm build
+        env:
+          VITE_ATLAS_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+      - name: Validate deployment size
+        run: node scripts/check-size.mjs
+      - name: Save static build for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: station-atlas
+          path: dist
+          retention-days: 7
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy static atlas
+        id: deployment
+        uses: actions/deploy-pages@v4
