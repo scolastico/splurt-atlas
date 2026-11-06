@@ -2,6 +2,8 @@
 
 **Live map: [splurt-atlas.scolasti.co](https://splurt-atlas.scolasti.co)**
 
+[GitHub Pages mirror](https://scolastico.github.io/splurt-atlas/) - much slower and not recommended; use the R2 site above.
+
 A static, zoomable map of [S.P.L.U.R.T.](https://github.com/SPLURT-Station/S.P.L.U.R.T-tg) stations. Node.js scripts acquire a pinned source checkout, parse BYOND DMM/TGM maps and DM declarations, decode DMI sprite sheets, and bake browser-ready WebP tiles. The deployed app needs no server, database, BYOND installation or API key.
 
 ## Run locally

@@ -18,8 +18,10 @@ export function deploymentTarget(env) {
 }
 
 export function deploymentCommands(directory,remote) {
-  const common=['--checksum','--fast-list','--transfers','16','--checkers','32','--stats','30s','--stats-one-line','--header-upload','Cache-Control: no-cache, no-transform'];
+  const common=['--checksum','--fast-list','--transfers','16','--checkers','32','--stats','30s','--stats-one-line','--retries','1','--low-level-retries','2','--header-upload','Cache-Control: no-cache, no-transform'];
   return [
+    // An actual benign PUT catches protocol/configuration errors before bulk sync.
+    ['copyto',path.join(directory,'data/ATLAS-NOTICE.txt'),remote+'data/ATLAS-NOTICE.txt','--ignore-times','--retries','1','--low-level-retries','1','--header-upload','Cache-Control: no-cache, no-transform'],
     ['sync',directory,remote,...common,'--delete-after','--exclude','/index.html','--exclude','/data/manifest.json'],
     ['copyto',path.join(directory,'data/manifest.json'),remote+'data/manifest.json',...common],
     ['copyto',path.join(directory,'index.html'),remote+'index.html',...common],
@@ -30,6 +32,7 @@ export function deploy(env=process.env,run=execFileSync) {
   const target=deploymentTarget(env),directory=path.resolve('dist');
   if(!env.R2_ACCESS_KEY||!env.R2_ACCESS_KEY_ID)throw new Error('R2_ACCESS_KEY and R2_ACCESS_KEY_ID secrets are required.');
   if(!existsSync(path.join(directory,'index.html')))throw new Error('Missing dist/index.html; refusing to synchronize an incomplete build.');
+  if(!existsSync(path.join(directory,'data/ATLAS-NOTICE.txt')))throw new Error('Missing deployment notice; refusing to synchronize an incomplete build.');
   const manifest=JSON.parse(readFileSync(path.join(directory,'data/manifest.json')));
   if(!manifest.maps?.length)throw new Error('Missing map catalog; refusing to synchronize an empty site.');
   const runtime={...env,RCLONE_CONFIG_R2_TYPE:'s3',RCLONE_CONFIG_R2_PROVIDER:'Cloudflare',RCLONE_CONFIG_R2_ACCESS_KEY_ID:env.R2_ACCESS_KEY_ID,RCLONE_CONFIG_R2_SECRET_ACCESS_KEY:env.R2_ACCESS_KEY,RCLONE_CONFIG_R2_ENDPOINT:target.endpoint,RCLONE_CONFIG_R2_REGION:'auto',RCLONE_CONFIG_R2_NO_CHECK_BUCKET:'true'};

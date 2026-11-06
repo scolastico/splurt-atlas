@@ -13,8 +13,9 @@ test('R2 destination requires an explicit bucket and confines deletion to its pr
 });
 test('R2 mirror checks content, removes obsolete objects after transfers, and publishes entry points last',()=>{
  const commands=deploymentCommands('dist','r2:bucket/site/');
- assert.equal(commands[0][0],'sync');assert.ok(commands[0].includes('--checksum'));assert.ok(commands[0].includes('--delete-after'));
- assert.ok(commands[0].includes('/index.html'));assert.ok(commands[0].includes('/data/manifest.json'));
- assert.equal(commands[1][2],'r2:bucket/site/data/manifest.json');assert.equal(commands[2][2],'r2:bucket/site/index.html');
+ assert.equal(commands[0][0],'copyto');assert.equal(commands[0][2],'r2:bucket/site/data/ATLAS-NOTICE.txt');assert.ok(commands[0].includes('--ignore-times'));
+ assert.equal(commands[1][0],'sync');assert.ok(commands[1].includes('--checksum'));assert.ok(commands[1].includes('--delete-after'));
+ assert.ok(commands[1].includes('/index.html'));assert.ok(commands[1].includes('/data/manifest.json'));
+ assert.equal(commands[2][2],'r2:bucket/site/data/manifest.json');assert.equal(commands[3][2],'r2:bucket/site/index.html');
  assert.ok(commands.every(command=>!command.some(value=>value.includes('secret'))));
 });

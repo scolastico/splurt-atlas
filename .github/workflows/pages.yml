@@ -177,8 +177,15 @@ jobs:
           path: dist
       - name: Install S3-compatible sync tool
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install --yes --no-install-recommends rclone
+          version=1.75.2
+          archive="rclone-v${version}-linux-amd64.zip"
+          cd "$RUNNER_TEMP"
+          curl --fail --silent --show-error --location --retry 3 --output "$archive" "https://downloads.rclone.org/v${version}/$archive"
+          curl --fail --silent --show-error --location --retry 3 --output SHA256SUMS "https://downloads.rclone.org/v${version}/SHA256SUMS"
+          grep " $archive$" SHA256SUMS | sha256sum --check --strict
+          unzip -q "$archive"
+          sudo install -m 755 "rclone-v${version}-linux-amd64/rclone" /usr/local/bin/rclone
+          rclone version
       - name: Mirror static site to R2
         run: node scripts/deploy-r2.mjs
         env:
