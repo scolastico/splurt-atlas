@@ -7,28 +7,39 @@ const url = process.env.ATLAS_URL || 'http://127.0.0.1:5173/';
 mkdirSync('.cache/qa', { recursive: true });
 const browser = await chromium.launch({ headless: false });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
-const errors = [], failed = [];
+const errors = [],
+  failed = [];
 await page.addInitScript(() => {
-  localStorage.setItem('atlas-storage-mode','none');
+  localStorage.setItem('atlas-storage-mode', 'none');
   window.__atlasFrames = [];
   const original = window.requestAnimationFrame;
-  window.requestAnimationFrame = callback => original.call(window, timestamp => {
-    const start = performance.now();
-    try { callback(timestamp); } finally { window.__atlasFrames.push(performance.now() - start); }
-  });
+  window.requestAnimationFrame = (callback) =>
+    original.call(window, (timestamp) => {
+      const start = performance.now();
+      try {
+        callback(timestamp);
+      } finally {
+        window.__atlasFrames.push(performance.now() - start);
+      }
+    });
 });
-page.on('pageerror', error => errors.push(error.message));
-page.on('response', response => { if (response.status() >= 400 && !response.url().includes('favicon')) failed.push(`${response.status()} ${response.url()}`); });
+page.on('pageerror', (error) => errors.push(error.message));
+page.on('response', (response) => {
+  if (response.status() >= 400 && !response.url().includes('favicon'))
+    failed.push(`${response.status()} ${response.url()}`);
+});
 const started = Date.now();
 try {
   await page.goto(url);
   await page.locator('#loading').waitFor({ state: 'hidden', timeout: 60000 });
-  await page.locator('#map-picker').waitFor({state:'visible'});
-  assert.equal(await page.locator('#map-picker .eyebrow').count(),0);
-  await page.locator('.map-card').filter({hasText:'Tramstation'}).click();
-  await page.locator('#loading').waitFor({state:'hidden',timeout:120000});
+  await page.locator('#map-picker').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#map-picker .eyebrow').count(), 0);
+  await page.locator('.map-card').filter({ hasText: 'Tramstation' }).click();
+  await page.locator('#loading').waitFor({ state: 'hidden', timeout: 120000 });
   await page.waitForFunction(() => document.querySelector('#source-status').textContent === 'ARCHIVE READY');
-  await page.waitForFunction(() => document.querySelector('#search-status').textContent.includes('Search rooms'));
+  await page.waitForFunction(() =>
+    document.querySelector('#search-status').textContent.includes('Search rooms'),
+  );
   await page.waitForTimeout(2000);
   assert.equal(await page.title(), 'S.P.L.U.R.T. / Station Atlas');
   assert.equal(await page.locator('header').count(), 0);
@@ -36,27 +47,33 @@ try {
   assert.equal(await page.locator('#map-title').textContent(), 'Tramstation');
   assert.equal(await page.locator('#decks button').count(), 2);
   await page.screenshot({ path: '.cache/qa/tramstation-overview.png' });
-  await page.locator('#search-tab').click();await page.locator('#search').fill('wernch');
+  await page.locator('#search-tab').click();
+  await page.locator('#search').fill('wernch');
   await page.waitForFunction(() => document.querySelectorAll('#results button').length > 0);
   const searchStatus = await page.locator('#search-status').textContent();
   await page.locator('#results button').filter({ hasText: 'POSSIBLE' }).first().click();
   await page.locator('#inspector').waitFor({ state: 'visible' });
   assert.ok((await page.locator('#inspector').textContent()).toLowerCase().includes('wrench'));
-  assert.ok(await page.locator('#inspector').evaluate(el => !!el.closest('#sidebar')));
-  assert.equal(await page.locator('#detailed-view').isChecked(),false);
-  assert.equal(await page.locator('#inspector details,#inspector a').count(),0);
-  await page.locator('#detailed-view').check();assert.ok(await page.locator('#inspector details').count()>0);await page.locator('#detailed-view').uncheck();
-  assert.ok(await page.locator('.finding-location').count() > 1);
+  assert.ok(await page.locator('#inspector').evaluate((el) => !!el.closest('#sidebar')));
+  assert.equal(await page.locator('#detailed-view').isChecked(), false);
+  assert.equal(await page.locator('#inspector details,#inspector a').count(), 0);
+  await page.locator('#detailed-view').check();
+  assert.ok((await page.locator('#inspector details').count()) > 0);
+  await page.locator('#detailed-view').uncheck();
+  assert.ok((await page.locator('.finding-location').count()) > 1);
   await page.waitForFunction(() => new URLSearchParams(location.hash.slice(1)).has('t'));
   const firstSelection = new URL(page.url()).hash;
   await page.locator('.finding-location').nth(1).click();
-  await page.waitForFunction(previous => location.hash !== previous, firstSelection);
+  await page.waitForFunction((previous) => location.hash !== previous, firstSelection);
   const selected = new URLSearchParams(new URL(page.url()).hash.slice(1)).get('t');
   assert.equal(await page.locator('.finding-location[aria-pressed=true]').getAttribute('data-index'), '1');
   await page.screenshot({ path: '.cache/qa/search-findings.png' });
-  await page.locator('#map').focus(); await page.keyboard.press('ArrowRight'); await page.waitForTimeout(200);
+  await page.locator('#map').focus();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(200);
   const savedCamera = new URLSearchParams(new URL(page.url()).hash.slice(1));
-  await page.reload(); await page.locator('#loading').waitFor({ state: 'hidden' });
+  await page.reload();
+  await page.locator('#loading').waitFor({ state: 'hidden' });
   await page.locator('#selection-panel').waitFor({ state: 'visible' });
   await page.locator('#search-findings').waitFor({ state: 'visible' });
   assert.equal(new URLSearchParams(new URL(page.url()).hash.slice(1)).get('t'), selected);
@@ -64,7 +81,12 @@ try {
   assert.equal(new URLSearchParams(new URL(page.url()).hash.slice(1)).get('f'), '2');
   assert.equal(await page.locator('.finding-location[aria-pressed=true]').getAttribute('data-index'), '1');
   const restoredCamera = new URLSearchParams(new URL(page.url()).hash.slice(1));
-  for (const key of ['x','y','s']) assert.equal(restoredCamera.get(key),savedCamera.get(key),`Restore ${key} without recentering the selected finding`);
+  for (const key of ['x', 'y', 's'])
+    assert.equal(
+      restoredCamera.get(key),
+      savedCamera.get(key),
+      `Restore ${key} without recentering the selected finding`,
+    );
   assert.equal(await page.locator('#inspect-tab').getAttribute('aria-pressed'), 'true');
   await page.locator('#explore-tab').click();
   const view = await page.locator('#map').boundingBox();
@@ -72,142 +94,298 @@ try {
   await page.locator('#regions').check();
   await page.waitForTimeout(2000);
   await page.screenshot({ path: '.cache/qa/tramstation-detail.png' });
-  await page.locator('#inspect-tab').click(); await page.locator('#inspector .close').click();
+  await page.locator('#inspect-tab').click();
+  await page.locator('#inspector .close').click();
   await page.waitForFunction(() => !new URLSearchParams(location.hash.slice(1)).has('t'));
-  await page.locator('#search-tab').click();await page.locator('#search').fill('/obj/item/radio/intercom/directional/south');
-  await page.waitForFunction(() => [...document.querySelectorAll('#results small')].some(el => el.textContent.includes('44 locations')));
-  await page.locator('#results button').filter({hasText:'44 locations'}).first().click();
-  await page.locator('.finding-pages .next').waitFor({state:'visible'});
+  await page.locator('#search-tab').click();
+  await page.locator('#search').fill('/obj/item/radio/intercom/directional/south');
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('#results small')].some((el) => el.textContent.includes('44 locations')),
+  );
+  await page.locator('#results button').filter({ hasText: '44 locations' }).first().click();
+  await page.locator('.finding-pages .next').waitFor({ state: 'visible' });
   await page.locator('.finding-pages .next').click();
-  assert.equal(await page.locator('.finding-location').first().getAttribute('data-index'),'30');
+  assert.equal(await page.locator('.finding-location').first().getAttribute('data-index'), '30');
   await page.locator('.finding-location').first().click();
   await page.waitForFunction(() => new URLSearchParams(location.hash.slice(1)).get('f') === '31');
-  assert.equal(await page.locator('.finding-location[aria-pressed=true]').getAttribute('data-index'),'30');
+  assert.equal(await page.locator('.finding-location[aria-pressed=true]').getAttribute('data-index'), '30');
   await page.locator('#inspector .close').click();
-  await page.locator('#sidebar-toggle').click(); await page.waitForTimeout(250);
+  await page.locator('#sidebar-toggle').click();
+  await page.waitForTimeout(250);
   assert.equal(await page.locator('#sidebar-toggle').getAttribute('aria-expanded'), 'false');
   assert.equal((await page.locator('#map').boundingBox()).x, 0);
-  await page.locator('#sidebar-toggle').click(); await page.waitForTimeout(250);
+  await page.locator('#sidebar-toggle').click();
+  await page.waitForTimeout(250);
   await page.locator('#decks button').last().click();
   assert.ok((await page.locator('#decks button.active').textContent()).includes('01'));
-  await page.locator('#cutaway').uncheck(); await page.locator('#motion').uncheck();
+  await page.locator('#cutaway').uncheck();
+  await page.locator('#motion').uncheck();
   await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2);
-  await page.mouse.down(); await page.mouse.move(view.x + view.width / 2 + 100, view.y + view.height / 2 + 50, { steps: 8 }); await page.mouse.up();
+  await page.mouse.down();
+  await page.mouse.move(view.x + view.width / 2 + 100, view.y + view.height / 2 + 50, { steps: 8 });
+  await page.mouse.up();
   await page.mouse.wheel(0, -300);
   await page.waitForTimeout(250);
   assert.ok(page.url().includes('s='));
-  await page.locator('#search-tab').click();await page.locator('#search').fill('engineering');
-  await page.waitForFunction(() => [...document.querySelectorAll('#results small')].some(x => x.textContent.includes('ROOM')));
+  await page.locator('#search-tab').click();
+  await page.locator('#search').fill('engineering');
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('#results small')].some((x) => x.textContent.includes('ROOM')),
+  );
   await page.locator('#station').selectOption('northstar');
   await page.waitForFunction(() => document.querySelector('#map-title').textContent === 'NorthStar');
   assert.equal(await page.locator('#decks button').count(), 4);
-  await page.locator('#cutaway').check(); await page.locator('#motion').check();
-  await page.locator('#search-tab').click();await page.locator('#search').fill('');await page.locator('#explore-tab').click(); await page.locator('#fit').click();
+  await page.locator('#cutaway').check();
+  await page.locator('#motion').check();
+  await page.locator('#search-tab').click();
+  await page.locator('#search').fill('');
+  await page.locator('#explore-tab').click();
+  await page.locator('#fit').click();
   await page.waitForTimeout(1500);
   await page.screenshot({ path: '.cache/qa/northstar-overview.png' });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.locator('#sidebar-toggle').getAttribute('aria-expanded'), 'true');
   await page.locator('#station').selectOption('voidraptor');
   await page.waitForFunction(() => document.querySelector('#map-title').textContent === 'Void Raptor');
-  await page.locator('#fit').click(); await page.locator('#sidebar-toggle').click(); await page.waitForTimeout(1500);
-  await page.waitForLoadState('networkidle');
-  const settledRequests = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => new URL(e.name).pathname.endsWith('.webp')).length);
+  await page.locator('#fit').click();
+  await page.locator('#sidebar-toggle').click();
   await page.waitForTimeout(1500);
-  const afterIdleRequests = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => new URL(e.name).pathname.endsWith('.webp')).length);
-  assert.equal(afterIdleRequests, settledRequests, 'Image cache must settle without repeatedly loading the same chunks');
+  await page.waitForLoadState('networkidle');
+  const settledRequests = await page.evaluate(
+    () =>
+      performance.getEntriesByType('resource').filter((e) => new URL(e.name).pathname.endsWith('.webp'))
+        .length,
+  );
+  await page.waitForTimeout(1500);
+  const afterIdleRequests = await page.evaluate(
+    () =>
+      performance.getEntriesByType('resource').filter((e) => new URL(e.name).pathname.endsWith('.webp'))
+        .length,
+  );
+  assert.equal(
+    afterIdleRequests,
+    settledRequests,
+    'Image cache must settle without repeatedly loading the same chunks',
+  );
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: '.cache/qa/mobile.png' });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.locator('#sidebar-toggle').click();
   await page.locator('#station').selectOption('northstar');
   await page.waitForFunction(() => document.querySelector('#map-title').textContent === 'NorthStar');
-  await page.locator('#fit').click(); await page.waitForTimeout(1500);
-  const stressUrl = new URL(url); stressUrl.searchParams.set('qa', 'stress'); stressUrl.hash = 'm=northstar&z=4&x=4080&y=4080&s=0.45';
+  await page.locator('#fit').click();
+  await page.waitForTimeout(1500);
+  const stressUrl = new URL(url);
+  stressUrl.searchParams.set('qa', 'stress');
+  stressUrl.hash = 'm=northstar&z=4&x=4080&y=4080&s=0.45';
   await page.goto(stressUrl.href);
   await page.locator('#loading').waitFor({ state: 'hidden' });
   for (const checkbox of await page.locator('#network-controls input').all()) await checkbox.check();
   await page.locator('#regions').check();
   await page.waitForLoadState('networkidle');
-  const backgroundBefore = await page.locator('#space').evaluate(el => el.toDataURL());
-  const mapBefore = await page.locator('#map').evaluate(el => el.toDataURL());
+  const backgroundBefore = await page.locator('#space').evaluate((el) => el.toDataURL());
+  const mapBefore = await page.locator('#map').evaluate((el) => el.toDataURL());
   await page.waitForTimeout(600);
-  assert.notEqual(await page.locator('#space').evaluate(el => el.toDataURL()), backgroundBefore, 'Stars should move while the camera is idle');
-  assert.equal(await page.locator('#map').evaluate(el => el.toDataURL()), mapBefore, 'Background animation should not redraw the station');
+  assert.notEqual(
+    await page.locator('#space').evaluate((el) => el.toDataURL()),
+    backgroundBefore,
+    'Stars should move while the camera is idle',
+  );
+  assert.equal(
+    await page.locator('#map').evaluate((el) => el.toDataURL()),
+    mapBefore,
+    'Background animation should not redraw the station',
+  );
   await page.locator('#motion').uncheck();
-  const pausedBackground = await page.locator('#space').evaluate(el => el.toDataURL());
+  const pausedBackground = await page.locator('#space').evaluate((el) => el.toDataURL());
   await page.waitForTimeout(300);
-  assert.equal(await page.locator('#space').evaluate(el => el.toDataURL()), pausedBackground, 'Motion toggle should pause the galaxy');
+  assert.equal(
+    await page.locator('#space').evaluate((el) => el.toDataURL()),
+    pausedBackground,
+    'Motion toggle should pause the galaxy',
+  );
   await page.locator('#motion').check();
-  const beforeStressIdle = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => new URL(e.name).pathname.endsWith('.webp')).length);
+  const beforeStressIdle = await page.evaluate(
+    () =>
+      performance.getEntriesByType('resource').filter((e) => new URL(e.name).pathname.endsWith('.webp'))
+        .length,
+  );
   await page.waitForTimeout(1500);
-  assert.equal(await page.evaluate(() => performance.getEntriesByType('resource').filter(e => new URL(e.name).pathname.endsWith('.webp')).length), beforeStressIdle, 'Four-deck detail with every network must settle');
+  assert.equal(
+    await page.evaluate(
+      () =>
+        performance.getEntriesByType('resource').filter((e) => new URL(e.name).pathname.endsWith('.webp'))
+          .length,
+    ),
+    beforeStressIdle,
+    'Four-deck detail with every network must settle',
+  );
   await page.locator('#map').focus();
-  for (let i = 0; i < 16; i++) { await page.keyboard.press(i < 8 ? 'ArrowRight' : 'ArrowLeft'); await page.waitForTimeout(30); }
+  for (let i = 0; i < 16; i++) {
+    await page.keyboard.press(i < 8 ? 'ArrowRight' : 'ArrowLeft');
+    await page.waitForTimeout(30);
+  }
   for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowRight');
   await page.waitForLoadState('networkidle');
-  assert.equal(await page.locator('#map').getAttribute('data-detail'),'1','Detail must stay at the same zoom mip near map borders');
+  assert.equal(
+    await page.locator('#map').getAttribute('data-detail'),
+    '1',
+    'Detail must stay at the same zoom mip near map borders',
+  );
   await page.screenshot({ path: '.cache/qa/northstar-networks.png' });
-  const entries = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => new URL(e.name).pathname.endsWith('.webp')).length);
+  const entries = await page.evaluate(
+    () =>
+      performance.getEntriesByType('resource').filter((e) => new URL(e.name).pathname.endsWith('.webp'))
+        .length,
+  );
   const frameStats = await page.evaluate(() => {
     const frames = window.__atlasFrames.slice().sort((a, b) => a - b);
-    return { callbacks: frames.length, medianMs: frames[Math.floor(frames.length * .5)], p95Ms: frames[Math.floor(frames.length * .95)] };
+    return {
+      callbacks: frames.length,
+      medianMs: frames[Math.floor(frames.length * 0.5)],
+      p95Ms: frames[Math.floor(frames.length * 0.95)],
+    };
   });
   // Compare actual exported geometry: lower content must change inside an
   // opening while a nearby opaque upper tile remains pixel-identical.
   const geometry = await (async () => {
-    const manifest = await fetch(new URL('./data/manifest.json', url)).then(r => r.json());
-    const read = name => fetch(new URL(`./data/${manifest.dataPath || ''}tramstation/${name}`, url)).then(r => r.json());
-    const [meta, upper, lower] = await Promise.all([read('map.json').then(decodeMap), read('2.json').then(decodeLevel), read('1.json').then(decodeLevel)]);
+    const manifest = await fetch(new URL('./data/manifest.json', url)).then((r) => r.json());
+    const read = (name) =>
+      fetch(new URL(`./data/${manifest.dataPath || ''}tramstation/${name}`, url)).then((r) => r.json());
+    const [meta, upper, lower] = await Promise.all([
+      read('map.json').then(decodeMap),
+      read('2.json').then(decodeLevel),
+      read('1.json').then(decodeLevel),
+    ]);
     for (let i = 0; i < upper.grid.length; i++) {
-      const a = meta.definitions[upper.grid[i]], b = meta.definitions[lower.grid[i]];
-      if (a?.aperture !== 255 || a.atoms.some(atom => !atom.path.startsWith('/turf/') && !atom.path.includes('/landmark')) || b?.aperture !== 0 || !b.turf.includes('/floor/')) continue;
-      const x = i % meta.width, y = Math.floor(i / meta.width);
-      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
-        const near = meta.definitions[upper.grid[(y + dy) * meta.width + x + dx]];
-        if (near?.aperture === 0 && near.turf.includes('/floor/')) return { x, y, opaqueX: x + dx, opaqueY: y + dy };
-      }
+      const a = meta.definitions[upper.grid[i]],
+        b = meta.definitions[lower.grid[i]];
+      if (
+        a?.aperture !== 255 ||
+        a.atoms.some((atom) => !atom.path.startsWith('/turf/') && !atom.path.includes('/landmark')) ||
+        b?.aperture !== 0 ||
+        !b.turf.includes('/floor/')
+      )
+        continue;
+      const x = i % meta.width,
+        y = Math.floor(i / meta.width);
+      for (let dy = -3; dy <= 3; dy++)
+        for (let dx = -3; dx <= 3; dx++) {
+          const near = meta.definitions[upper.grid[(y + dy) * meta.width + x + dx]];
+          if (near?.aperture === 0 && near.turf.includes('/floor/'))
+            return { x, y, opaqueX: x + dx, opaqueY: y + dy };
+        }
     }
     return null;
   })();
 
   assert.ok(geometry, 'Fixture station needs an opening above a floor');
-  const cutawayUrl = new URL(url); cutawayUrl.searchParams.set('qa', 'cutaway');
-  cutawayUrl.hash = `m=tramstation&z=2&x=${(geometry.x + .5) * 32}&y=${(geometry.y + .5) * 32}&s=2`;
-  await page.goto(cutawayUrl.href); await page.locator('#loading').waitFor({ state: 'hidden' });
-  await page.locator('#motion').uncheck(); await page.waitForLoadState('networkidle');
-  const pixels = () => page.evaluate(({ x, y, opaqueX, opaqueY }) => {
-    const readStation=(canvas,x,y,w,h)=>{const gl=canvas.getContext('webgl2')||canvas.getContext('webgl');if(!gl)return Array.from(canvas.getContext('2d').getImageData(x,y,w,h).data);const raw=new Uint8Array(w*h*4);gl.readPixels(x,canvas.height-y-h,w,h,gl.RGBA,gl.UNSIGNED_BYTE,raw);const out=[];for(let row=h-1;row>=0;row--)out.push(...raw.subarray(row*w*4,(row+1)*w*4));return out;};
-    const canvas = document.querySelector('#map');
-    return [[0, 0], [opaqueX - x, opaqueY - y]].map(([dx, dy]) => readStation(canvas, Math.floor(((canvas.width + (innerWidth > 650 && !document.body.classList.contains('sidebar-collapsed') ? document.querySelector('#sidebar').getBoundingClientRect().width * canvas.width / canvas.getBoundingClientRect().width : 0)) / 2) + dx * 64 - 2), Math.floor(canvas.height / 2 + dy * 64 - 2), 4, 4));
-  }, geometry);
+  const cutawayUrl = new URL(url);
+  cutawayUrl.searchParams.set('qa', 'cutaway');
+  cutawayUrl.hash = `m=tramstation&z=2&x=${(geometry.x + 0.5) * 32}&y=${(geometry.y + 0.5) * 32}&s=2`;
+  await page.goto(cutawayUrl.href);
+  await page.locator('#loading').waitFor({ state: 'hidden' });
+  await page.locator('#motion').uncheck();
+  await page.waitForLoadState('networkidle');
+  const pixels = () =>
+    page.evaluate(({ x, y, opaqueX, opaqueY }) => {
+      const readStation = (canvas, x, y, w, h) => {
+        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+        if (!gl) return Array.from(canvas.getContext('2d').getImageData(x, y, w, h).data);
+        const raw = new Uint8Array(w * h * 4);
+        gl.readPixels(x, canvas.height - y - h, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+        const out = [];
+        for (let row = h - 1; row >= 0; row--) out.push(...raw.subarray(row * w * 4, (row + 1) * w * 4));
+        return out;
+      };
+      const canvas = document.querySelector('#map');
+      return [
+        [0, 0],
+        [opaqueX - x, opaqueY - y],
+      ].map(([dx, dy]) =>
+        readStation(
+          canvas,
+          Math.floor(
+            (canvas.width +
+              (innerWidth > 650 && !document.body.classList.contains('sidebar-collapsed')
+                ? (document.querySelector('#sidebar').getBoundingClientRect().width * canvas.width) /
+                  canvas.getBoundingClientRect().width
+                : 0)) /
+              2 +
+              dx * 64 -
+              2,
+          ),
+          Math.floor(canvas.height / 2 + dy * 64 - 2),
+          4,
+          4,
+        ),
+      );
+    }, geometry);
   const through = await pixels();
-  await page.locator('#cutaway').uncheck(); await page.waitForTimeout(150);
+  await page.locator('#cutaway').uncheck();
+  await page.waitForTimeout(150);
   const solid = await pixels();
   assert.notDeepEqual(through[0], solid[0], 'Opening should expose the lower deck');
   // Premultiplied bitmaps may round nearly opaque sprite pixels by one unit.
-  assert.ok(through[1].every((value, index) => Math.abs(value - solid[1][index]) <= 1), `Opaque floor must block the lower deck: ${through[1]} vs ${solid[1]}`);
-  await page.locator('#cutaway').check(); await page.waitForTimeout(150);
+  assert.ok(
+    through[1].every((value, index) => Math.abs(value - solid[1][index]) <= 1),
+    `Opaque floor must block the lower deck: ${through[1]} vs ${solid[1]}`,
+  );
+  await page.locator('#cutaway').check();
+  await page.waitForTimeout(150);
   await page.screenshot({ path: '.cache/qa/cutaway.png' });
-  const asteroidUrl = new URL(url); asteroidUrl.searchParams.set('qa','asteroid');
+  const asteroidUrl = new URL(url);
+  asteroidUrl.searchParams.set('qa', 'asteroid');
   asteroidUrl.hash = 'm=tramstation&z=2&x=3632&y=6160&s=2';
-  await page.goto(asteroidUrl.href); await page.locator('#loading').waitFor({ state: 'hidden' });
-  await page.locator('#motion').uncheck(); await page.waitForLoadState('networkidle');
-  const asteroidPixels = () => page.locator('#map').evaluate(canvas => {
-    const readStation=(canvas,x,y,w,h)=>{const gl=canvas.getContext('webgl2')||canvas.getContext('webgl');if(!gl)return Array.from(canvas.getContext('2d').getImageData(x,y,w,h).data);const raw=new Uint8Array(w*h*4);gl.readPixels(x,canvas.height-y-h,w,h,gl.RGBA,gl.UNSIGNED_BYTE,raw);const out=[];for(let row=h-1;row>=0;row--)out.push(...raw.subarray(row*w*4,(row+1)*w*4));return out;};
-    const x = Math.floor(((canvas.width + (innerWidth > 650 && !document.body.classList.contains('sidebar-collapsed') ? document.querySelector('#sidebar').getBoundingClientRect().width * canvas.width / canvas.getBoundingClientRect().width : 0)) / 2)), y = Math.floor(canvas.height/2);
-    return [readStation(canvas,x,y,1,1),readStation(canvas,x,y+64,1,1)];
-  });
+  await page.goto(asteroidUrl.href);
+  await page.locator('#loading').waitFor({ state: 'hidden' });
+  await page.locator('#motion').uncheck();
+  await page.waitForLoadState('networkidle');
+  const asteroidPixels = () =>
+    page.locator('#map').evaluate((canvas) => {
+      const readStation = (canvas, x, y, w, h) => {
+        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+        if (!gl) return Array.from(canvas.getContext('2d').getImageData(x, y, w, h).data);
+        const raw = new Uint8Array(w * h * 4);
+        gl.readPixels(x, canvas.height - y - h, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+        const out = [];
+        for (let row = h - 1; row >= 0; row--) out.push(...raw.subarray(row * w * 4, (row + 1) * w * 4));
+        return out;
+      };
+      const x = Math.floor(
+          (canvas.width +
+            (innerWidth > 650 && !document.body.classList.contains('sidebar-collapsed')
+              ? (document.querySelector('#sidebar').getBoundingClientRect().width * canvas.width) /
+                canvas.getBoundingClientRect().width
+              : 0)) /
+            2,
+        ),
+        y = Math.floor(canvas.height / 2);
+      return [readStation(canvas, x, y, 1, 1), readStation(canvas, x, y + 64, 1, 1)];
+    });
   const asteroidThrough = await asteroidPixels();
-  await page.locator('#cutaway').uncheck(); await page.waitForTimeout(150);
+  await page.locator('#cutaway').uncheck();
+  await page.waitForTimeout(150);
   const asteroidTop = await asteroidPixels();
-  assert.equal(asteroidTop[0][3],255,'Reported porous-rock tile must render its solid rock image');
-  assert.deepEqual(asteroidThrough[0],asteroidTop[0],'Solid rock body should cover the lower deck');
-  assert.equal(asteroidTop[1][3],0,'Adjacent open space has no upper-deck surface');
-  assert.ok(asteroidThrough[1][3]>0,'Adjacent open space must reveal the lower deck');
-  await page.locator('#cutaway').check(); await page.waitForTimeout(150);
+  assert.equal(asteroidTop[0][3], 255, 'Reported porous-rock tile must render its solid rock image');
+  assert.deepEqual(asteroidThrough[0], asteroidTop[0], 'Solid rock body should cover the lower deck');
+  assert.equal(asteroidTop[1][3], 0, 'Adjacent open space has no upper-deck surface');
+  assert.ok(asteroidThrough[1][3] > 0, 'Adjacent open space must reveal the lower deck');
+  await page.locator('#cutaway').check();
+  await page.waitForTimeout(150);
   await page.screenshot({ path: '.cache/qa/asteroid-regression.png' });
-  assert.deepEqual(errors, []); assert.deepEqual(failed, []);
-  const report = { passed: true, durationMs: Date.now() - started, searchStatus, imageRequests: entries, frameStats, errors, failed, note: 'Visible Chromium browser. Frame timings measure CPU callback time during this smoke run, not GPU time or a frame-rate guarantee.' };
+  assert.deepEqual(errors, []);
+  assert.deepEqual(failed, []);
+  const report = {
+    passed: true,
+    durationMs: Date.now() - started,
+    searchStatus,
+    imageRequests: entries,
+    frameStats,
+    errors,
+    failed,
+    note: 'Visible Chromium browser. Frame timings measure CPU callback time during this smoke run, not GPU time or a frame-rate guarantee.',
+  };
   writeFileSync('.cache/qa/browser-report.json', JSON.stringify(report, null, 2));
   console.log(report);
 } finally {

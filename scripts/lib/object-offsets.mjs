@@ -1,9 +1,13 @@
 // Known map-load placement rules shared by raster rendering and inspector bounds.
 // These are source rules, not guesses based on the nearest wall.
 export function objectOffsets(type, vars, db) {
-  const value = raw => db.literal ? db.literal(raw) : raw;
+  const value = (raw) => (db.literal ? db.literal(raw) : raw);
   const result = { ...vars };
-  for (const key of ['pixel_x', 'pixel_y', 'pixel_w', 'pixel_z']) if (result[key] !== undefined) { const resolved=value(result[key]);result[key]=resolved==='null'?'0':resolved; }
+  for (const key of ['pixel_x', 'pixel_y', 'pixel_w', 'pixel_z'])
+    if (result[key] !== undefined) {
+      const resolved = value(result[key]);
+      result[key] = resolved === 'null' ? '0' : resolved;
+    }
   const dir = Number(value(vars.dir || '2'));
   if (/^\/obj\/machinery\/power\/apc(?:\/|$)/.test(type)) {
     // APC Initialize(mapload) always calls setDir, including non-helper subtypes.

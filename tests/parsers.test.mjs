@@ -8,8 +8,18 @@ import { fileURLToPath } from 'node:url';
 import { expandStructures, smoothAtoms } from '../scripts/lib/appearance.mjs';
 
 test('DMM preserves coordinate origin and reverses rows into BYOND north-up coordinates', () => {
-  const map = parseDmm('"a" = (/turf/open/floor,/area/test)\n"b" = (/obj/item/test{name = "comma, and ; semicolon"; loot = list(/obj/item/a, /obj/item/b)},/turf/open/space,/area/test)\n(3,5,2) = {"\nab\nba\n"}');
-  assert.deepEqual(map.cells.map(c => [c.x, c.y, c.z, c.key]), [[3, 6, 2, 'a'], [4, 6, 2, 'b'], [3, 5, 2, 'b'], [4, 5, 2, 'a']]);
+  const map = parseDmm(
+    '"a" = (/turf/open/floor,/area/test)\n"b" = (/obj/item/test{name = "comma, and ; semicolon"; loot = list(/obj/item/a, /obj/item/b)},/turf/open/space,/area/test)\n(3,5,2) = {"\nab\nba\n"}',
+  );
+  assert.deepEqual(
+    map.cells.map((c) => [c.x, c.y, c.z, c.key]),
+    [
+      [3, 6, 2, 'a'],
+      [4, 6, 2, 'b'],
+      [3, 5, 2, 'b'],
+      [4, 5, 2, 'a'],
+    ],
+  );
   assert.equal(map.dictionary.get('b')[0].vars.name, '"comma, and ; semicolon"');
   assert.equal(map.dictionary.get('b')[0].vars.loot, 'list(/obj/item/a, /obj/item/b)');
 });
@@ -20,15 +30,25 @@ test('TGM column blocks use their own Y origin and share a dictionary', () => {
 });
 test('nested strings and comments do not break static declarations', () => {
   assert.deepEqual(splitTop('list("a,b", /obj/a), /obj/b'), ['list("a,b", /obj/a)', '/obj/b']);
-  assert.equal(stripComments('name = "https://example.com" // comment\n/* block */\n/obj/a').includes('"https://example.com"'), true);
+  assert.equal(
+    stripComments('name = "https://example.com" // comment\n/* block */\n/obj/a').includes(
+      '"https://example.com"',
+    ),
+    true,
+  );
   assert.equal(stripComments('/* /obj/invalid */').trim(), '');
 });
 test('DMI state offsets include every direction and animation frame', () => {
-  const description = '# BEGIN DMI\nwidth = 32\nheight = 48\nstate = "first"\ndirs = 4\nframes = 3\nstate = "second"\ndirs = 1\nframes = 1\n# END DMI';
-  const data = Buffer.concat([Buffer.from('Description\0\0'), deflateSync(description)]), chunk = Buffer.alloc(data.length + 12);
-  chunk.writeUInt32BE(data.length, 0); chunk.write('zTXt', 4); data.copy(chunk, 8);
+  const description =
+    '# BEGIN DMI\nwidth = 32\nheight = 48\nstate = "first"\ndirs = 4\nframes = 3\nstate = "second"\ndirs = 1\nframes = 1\n# END DMI';
+  const data = Buffer.concat([Buffer.from('Description\0\0'), deflateSync(description)]),
+    chunk = Buffer.alloc(data.length + 12);
+  chunk.writeUInt32BE(data.length, 0);
+  chunk.write('zTXt', 4);
+  data.copy(chunk, 8);
   const meta = dmiMetadata(Buffer.concat([Buffer.alloc(8), chunk]));
-  assert.equal(meta.height, 48); assert.equal(meta.states.get('second').offset, 12);
+  assert.equal(meta.height, 48);
+  assert.equal(meta.states.get('second').offset, 12);
 });
 test('cutaway opens only through known transparent turf families', () => {
   assert.equal(aperture('/turf/open/floor/glass'), 190);
@@ -39,21 +59,50 @@ test('cutaway opens only through known transparent turf families', () => {
   assert.equal(classify('/obj/structure/transit_tube/curved'), 'transit');
 });
 test('deterministic structure spawners expand into rendered window and grille', () => {
-  const db = { resolve: p => p.includes('/spawner/') ? { spawn_list: 'list(/obj/structure/grille, /obj/structure/window/fulltile)' } : {} };
+  const db = {
+    resolve: (p) =>
+      p.includes('/spawner/')
+        ? { spawn_list: 'list(/obj/structure/grille, /obj/structure/window/fulltile)' }
+        : {},
+  };
   const result = expandStructures([{ path: '/obj/effect/spawner/structure/window', vars: {} }], db);
-  assert.deepEqual(result.map(a => a.path), ['/obj/structure/grille', '/obj/structure/window/fulltile']);
+  assert.deepEqual(
+    result.map((a) => a.path),
+    ['/obj/structure/grille', '/obj/structure/window/fulltile'],
+  );
 });
-test('reflectors use their actual mirror/box overlays and fluid ducts keep their assigned color',()=>{
- const db={resolve:path=>path.includes('reflector')?{deflector_icon_state:'"reflector_double"',rotation_angle:'-1'}:{duct_color:'"#00ff00"',duct_layer:'(1<<3)'},literal:value=>value};
- const mirror=expandStructures([{path:'/obj/structure/reflector/double/anchored',vars:{dir:'5'}}],db);assert.equal(mirror[0].vars.icon_state,'"reflector_base"');assert.equal(mirror[1].vars.icon_state,'"reflector_double"');assert.equal(mirror[1].vars.atlas_rotation,'45');
- const duct=expandStructures([{path:'/obj/machinery/duct',vars:{}}],db)[0];assert.equal(duct.vars.color,'"#00ff00"');assert.equal(duct.vars.pixel_x,'5');
+test('reflectors use their actual mirror/box overlays and fluid ducts keep their assigned color', () => {
+  const db = {
+    resolve: (path) =>
+      path.includes('reflector')
+        ? { deflector_icon_state: '"reflector_double"', rotation_angle: '-1' }
+        : { duct_color: '"#00ff00"', duct_layer: '(1<<3)' },
+    literal: (value) => value,
+  };
+  const mirror = expandStructures(
+    [{ path: '/obj/structure/reflector/double/anchored', vars: { dir: '5' } }],
+    db,
+  );
+  assert.equal(mirror[0].vars.icon_state, '"reflector_base"');
+  assert.equal(mirror[1].vars.icon_state, '"reflector_double"');
+  assert.equal(mirror[1].vars.atlas_rotation, '45');
+  const duct = expandStructures([{ path: '/obj/machinery/duct', vars: {} }], db)[0];
+  assert.equal(duct.vars.color, '"#00ff00"');
+  assert.equal(duct.vars.pixel_x, '5');
 });
 test('smoothing uses BYOND north and only fills diagonals with both cardinal neighbors', () => {
-  const db = { resolve: () => ({ icon_state: '"wall-0"', smoothing_flags: 'SMOOTH_BITMASK', canSmoothWith: 'SMOOTH_GROUP_WALLS', smoothing_groups: 'SMOOTH_GROUP_WALLS' }) };
+  const db = {
+    resolve: () => ({
+      icon_state: '"wall-0"',
+      smoothing_flags: 'SMOOTH_BITMASK',
+      canSmoothWith: 'SMOOTH_GROUP_WALLS',
+      smoothing_groups: 'SMOOTH_GROUP_WALLS',
+    }),
+  };
   const atom = { path: '/turf/closed/wall', vars: {} };
-  const at = (x, y) => (x === 1 && y === 2 || x === 2 && y === 1 || x === 2 && y === 2) ? [atom] : [];
+  const at = (x, y) => ((x === 1 && y === 2) || (x === 2 && y === 1) || (x === 2 && y === 2) ? [atom] : []);
   assert.equal(smoothAtoms([atom], 1, 1, 1, at, db)[0].vars.icon_state, '"wall-21"');
-  assert.equal(smoothAtoms([atom], 1, 1, 1, at, {...db,hasIconState:()=>false})[0],atom);
+  assert.equal(smoothAtoms([atom], 1, 1, 1, at, { ...db, hasIconState: () => false })[0], atom);
 });
 test('DM inheritance respects explicit parents, include order, constants and nested global loot pools', () => {
   const db = loadTypes(fileURLToPath(new URL('./fixtures/', import.meta.url)));

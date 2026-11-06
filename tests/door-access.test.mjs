@@ -1,10 +1,62 @@
-import test from 'node:test';import assert from 'node:assert/strict';
-import {createDoorResolver} from '../scripts/lib/door-access.mjs';
-const trims={'/datum/id_trim/job/engineer':{assignment:'"Station Engineer"',minimal_access:'list(ACCESS_ENGINEERING)',extra_access:'list(ACCESS_TECH_STORAGE)'},'/datum/id_trim/job/doctor':{assignment:'"Medical Doctor"',minimal_access:'list(ACCESS_MEDICAL)'},'/datum/id_trim/job/captain':{assignment:'"Captain"'}};
-const db={types:new Map(Object.keys(trims).map(k=>[k,{}])),literal:v=>v,resolve:p=>trims[p]||{},files:[['helpers.dm','/obj/effect/mapping_helpers/airlock/access/all/engineering/general/get_access()\n\taccess_list += ACCESS_ENGINEERING\n\treturn access_list\n']]};
-test('door access resolves mapped helpers into ordinary starting roles',()=>{const door={path:'/obj/machinery/door/airlock',vars:{}};const access=createDoorResolver(db)([door,{path:'/obj/effect/mapping_helpers/airlock/access/all/engineering/general'}],door);assert.deepEqual(access.roles,['Captain','Station Engineer']);});
-test('door access distinguishes all/any requirements and expanded job access',()=>{const resolve=createDoorResolver(db);const a={path:'/obj/machinery/door/airlock',vars:{req_access:'list(ACCESS_ENGINEERING,ACCESS_MEDICAL)'}};assert.deepEqual(resolve([a],a).roles,['Captain']);const b={path:a.path,vars:{req_one_access:'list(ACCESS_ENGINEERING,ACCESS_MEDICAL)'}};assert.deepEqual(resolve([b],b).roles,['Captain','Medical Doctor','Station Engineer']);const c={path:a.path,vars:{req_access:'list(ACCESS_TECH_STORAGE)'}};assert.deepEqual(resolve([c],c).expandedRoles,['Station Engineer']);});
-test('unresolved helper access is not reported as a public door',()=>{const door={path:'/obj/machinery/door/airlock',vars:{}};assert.equal(createDoorResolver(db)([door,{path:'/obj/effect/mapping_helpers/airlock/access/all/custom'}],door).kind,'unknown');});
-test('access metadata preserves helper implementations and mapped requirement provenance',()=>{
- const door={path:'/obj/machinery/door/airlock',vars:{req_access:'list(ACCESS_MEDICAL)'}},helper={path:'/obj/effect/mapping_helpers/airlock/access/all/engineering/general'};const resolve=createDoorResolver(db),result=resolve([door,helper],door);assert.equal(result.sources.requirements[0].mapped,true);assert.equal(result.sources.requirements[0].property,'req_access');assert.equal(result.sources.helpers[0].file,'helpers.dm');assert.ok(result.sources.helpers[0].access.includes('ACCESS_ENGINEERING'));assert.equal(resolve.roleSources['Station Engineer'].type,'/datum/id_trim/job/engineer');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createDoorResolver } from '../scripts/lib/door-access.mjs';
+const trims = {
+  '/datum/id_trim/job/engineer': {
+    assignment: '"Station Engineer"',
+    minimal_access: 'list(ACCESS_ENGINEERING)',
+    extra_access: 'list(ACCESS_TECH_STORAGE)',
+  },
+  '/datum/id_trim/job/doctor': { assignment: '"Medical Doctor"', minimal_access: 'list(ACCESS_MEDICAL)' },
+  '/datum/id_trim/job/captain': { assignment: '"Captain"' },
+};
+const db = {
+  types: new Map(Object.keys(trims).map((k) => [k, {}])),
+  literal: (v) => v,
+  resolve: (p) => trims[p] || {},
+  files: [
+    [
+      'helpers.dm',
+      '/obj/effect/mapping_helpers/airlock/access/all/engineering/general/get_access()\n\taccess_list += ACCESS_ENGINEERING\n\treturn access_list\n',
+    ],
+  ],
+};
+test('door access resolves mapped helpers into ordinary starting roles', () => {
+  const door = { path: '/obj/machinery/door/airlock', vars: {} };
+  const access = createDoorResolver(db)(
+    [door, { path: '/obj/effect/mapping_helpers/airlock/access/all/engineering/general' }],
+    door,
+  );
+  assert.deepEqual(access.roles, ['Captain', 'Station Engineer']);
+});
+test('door access distinguishes all/any requirements and expanded job access', () => {
+  const resolve = createDoorResolver(db);
+  const a = {
+    path: '/obj/machinery/door/airlock',
+    vars: { req_access: 'list(ACCESS_ENGINEERING,ACCESS_MEDICAL)' },
+  };
+  assert.deepEqual(resolve([a], a).roles, ['Captain']);
+  const b = { path: a.path, vars: { req_one_access: 'list(ACCESS_ENGINEERING,ACCESS_MEDICAL)' } };
+  assert.deepEqual(resolve([b], b).roles, ['Captain', 'Medical Doctor', 'Station Engineer']);
+  const c = { path: a.path, vars: { req_access: 'list(ACCESS_TECH_STORAGE)' } };
+  assert.deepEqual(resolve([c], c).expandedRoles, ['Station Engineer']);
+});
+test('unresolved helper access is not reported as a public door', () => {
+  const door = { path: '/obj/machinery/door/airlock', vars: {} };
+  assert.equal(
+    createDoorResolver(db)([door, { path: '/obj/effect/mapping_helpers/airlock/access/all/custom' }], door)
+      .kind,
+    'unknown',
+  );
+});
+test('access metadata preserves helper implementations and mapped requirement provenance', () => {
+  const door = { path: '/obj/machinery/door/airlock', vars: { req_access: 'list(ACCESS_MEDICAL)' } },
+    helper = { path: '/obj/effect/mapping_helpers/airlock/access/all/engineering/general' };
+  const resolve = createDoorResolver(db),
+    result = resolve([door, helper], door);
+  assert.equal(result.sources.requirements[0].mapped, true);
+  assert.equal(result.sources.requirements[0].property, 'req_access');
+  assert.equal(result.sources.helpers[0].file, 'helpers.dm');
+  assert.ok(result.sources.helpers[0].access.includes('ACCESS_ENGINEERING'));
+  assert.equal(resolve.roleSources['Station Engineer'].type, '/datum/id_trim/job/engineer');
 });

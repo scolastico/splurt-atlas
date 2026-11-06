@@ -1,0 +1,8 @@
+public/
+dist/
+.cache/
+.source/
+release/
+node_modules/
+pnpm-lock.yaml
+index.html

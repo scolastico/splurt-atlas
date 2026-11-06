@@ -59,16 +59,16 @@ Offline saving downloads one ZIP per map instead of hundreds of separate files. 
 
 The `o` bitmask uses these bit positions (a set bit enables the option):
 
-| Bit | Option | Bit | Option |
-| --- | --- | --- | --- |
-| 0 | Atmospherics | 8 | Simple utility symbols |
-| 1 | Power cables | 9 | Stair/ladder highlights |
-| 2 | Waste disposal | 10 | Stair/ladder direction arrows |
-| 3 | Transit tubes | 11 | Detailed tile inspector |
-| 4 | Room boundaries | 12 | Placed items in search |
-| 5 | Lower-deck visibility | 13 | Possible items in search |
-| 6 | Animated parallax | 14 | Runtime terrain replacement |
-| 7 | Separate power-network colors | 15 | Fluid ducts |
+| Bit | Option                        | Bit | Option                        |
+| --- | ----------------------------- | --- | ----------------------------- |
+| 0   | Atmospherics                  | 8   | Simple utility symbols        |
+| 1   | Power cables                  | 9   | Stair/ladder highlights       |
+| 2   | Waste disposal                | 10  | Stair/ladder direction arrows |
+| 3   | Transit tubes                 | 11  | Detailed tile inspector       |
+| 4   | Room boundaries               | 12  | Placed items in search        |
+| 5   | Lower-deck visibility         | 13  | Possible items in search      |
+| 6   | Animated parallax             | 14  | Runtime terrain replacement   |
+| 7   | Separate power-network colors | 15  | Fluid ducts                   |
 
 For example, bit 3 has value `8`; combining enabled options adds their values. A complete shared link might start with `#m=tramstation&z=2&x=3632&y=6160&s=1&o=29800`.
 
@@ -105,28 +105,28 @@ The project repository is [scolastico/splurt-atlas](https://github.com/scolastic
 
 ## Pipeline and output format
 
-| Location | Purpose |
-| --- | --- |
-| `scripts/source.mjs` | Download or locally clone upstream and check out the exact configured commit |
-| `scripts/lib/dmm.mjs` | Parse dictionaries, overrides, strings, nested lists, and coordinate blocks |
-| `scripts/lib/dm.mjs` | Read declarations in `.dme` include order, inherit properties and static loot pools |
-| `scripts/lib/appearance.mjs` | Expand declarative structure spawners and ordinary neighbor bitmask smoothing |
-| `scripts/lib/dmi.mjs` | Read PNG DMI metadata; extract the first animation frame in the mapped direction |
-| `scripts/export.mjs` | Bake sparse chunk strips, their level-of-detail pyramid, overview strips, previews, transparency metadata, rooms and search records |
-| `scripts/lib/map-format.mjs` | Schema 3 encoder/decoder: shared atom/string/value tables, run-length grids, search point sets and strip channel masks |
-| `scripts/lib/image-pyramid.mjs` | Write chunk strips and build the 2×2 level-of-detail pyramid from them |
-| `scripts/lib/infrastructure.mjs` | Derive cable components, connecting cable/pipe states, and deck destinations |
-| `scripts/lib/door-access.mjs` | Resolve mapped door requirements against normal and expanded job ID access |
-| `scripts/index-assets.mjs` | Write full offline asset inventories and assign a new cache build ID |
-| `public/data/manifest.json` | Schema version, source repository/commit, station catalog and tile dimensions |
-| `public/data/<map>/map.json` | Areas, room anchors, source paths, map traits, door roles and infrastructure graphs; definitions reference a deduplicated atom table whose strings and access rules are interned |
-| `public/data/<map>/assets.json` | Relative paths and byte sizes for pre-caching the complete map |
-| `public/data/<map>/<z>.json` | Run-length encoded north-up row-major tile dictionary indices (`-1` for unmapped cells), station bounds, chunk list with channel bitmasks |
-| `public/data/<map>/<z>/` | One lossless WebP strip per chunk (`c-<x>-<y>.webp`) stacking every present channel, level-of-detail strips `l1-<x>-<y>.webp` (32 × 32 tiles) and `l2-<x>-<y>.webp` (64 × 64 tiles) at the same 512 px size, terrain and utility overview strips, coarse PNG aperture mask |
-| `public/data/<map>/preview.webp` | Small station preview for the picker (`preview-natural.webp` with generated terrain) |
-| `public/data/<map>/search.json` | Item records, placed/possible classification, candidate spawner, and flat XYZ triples; identical point lists are stored once |
-| `public/data/<map>/report.json` | Unresolved spawners and sprite fallback counts/samples |
-| `public/data/asset-sources.json` | Referenced DMI paths and the exact source revision |
+| Location                         | Purpose                                                                                                                                                                                                                                                                    |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/source.mjs`             | Download or locally clone upstream and check out the exact configured commit                                                                                                                                                                                               |
+| `scripts/lib/dmm.mjs`            | Parse dictionaries, overrides, strings, nested lists, and coordinate blocks                                                                                                                                                                                                |
+| `scripts/lib/dm.mjs`             | Read declarations in `.dme` include order, inherit properties and static loot pools                                                                                                                                                                                        |
+| `scripts/lib/appearance.mjs`     | Expand declarative structure spawners and ordinary neighbor bitmask smoothing                                                                                                                                                                                              |
+| `scripts/lib/dmi.mjs`            | Read PNG DMI metadata; extract the first animation frame in the mapped direction                                                                                                                                                                                           |
+| `scripts/export.mjs`             | Bake sparse chunk strips, their level-of-detail pyramid, overview strips, previews, transparency metadata, rooms and search records                                                                                                                                        |
+| `scripts/lib/map-format.mjs`     | Schema 3 encoder/decoder: shared atom/string/value tables, run-length grids, search point sets and strip channel masks                                                                                                                                                     |
+| `scripts/lib/image-pyramid.mjs`  | Write chunk strips and build the 2×2 level-of-detail pyramid from them                                                                                                                                                                                                     |
+| `scripts/lib/infrastructure.mjs` | Derive cable components, connecting cable/pipe states, and deck destinations                                                                                                                                                                                               |
+| `scripts/lib/door-access.mjs`    | Resolve mapped door requirements against normal and expanded job ID access                                                                                                                                                                                                 |
+| `scripts/index-assets.mjs`       | Write full offline asset inventories and assign a new cache build ID                                                                                                                                                                                                       |
+| `public/data/manifest.json`      | Schema version, source repository/commit, station catalog and tile dimensions                                                                                                                                                                                              |
+| `public/data/<map>/map.json`     | Areas, room anchors, source paths, map traits, door roles and infrastructure graphs; definitions reference a deduplicated atom table whose strings and access rules are interned                                                                                           |
+| `public/data/<map>/assets.json`  | Relative paths and byte sizes for pre-caching the complete map                                                                                                                                                                                                             |
+| `public/data/<map>/<z>.json`     | Run-length encoded north-up row-major tile dictionary indices (`-1` for unmapped cells), station bounds, chunk list with channel bitmasks                                                                                                                                  |
+| `public/data/<map>/<z>/`         | One lossless WebP strip per chunk (`c-<x>-<y>.webp`) stacking every present channel, level-of-detail strips `l1-<x>-<y>.webp` (32 × 32 tiles) and `l2-<x>-<y>.webp` (64 × 64 tiles) at the same 512 px size, terrain and utility overview strips, coarse PNG aperture mask |
+| `public/data/<map>/preview.webp` | Small station preview for the picker (`preview-natural.webp` with generated terrain)                                                                                                                                                                                       |
+| `public/data/<map>/search.json`  | Item records, placed/possible classification, candidate spawner, and flat XYZ triples; identical point lists are stored once                                                                                                                                               |
+| `public/data/<map>/report.json`  | Unresolved spawners and sprite fallback counts/samples                                                                                                                                                                                                                     |
+| `public/data/asset-sources.json` | Referenced DMI paths and the exact source revision                                                                                                                                                                                                                         |
 
 Map coordinates remain BYOND's one-based X/Y/Z; image Y coordinates are flipped so north is up. JSON dictionaries preserve original map object paths and overrides; `decodeMap`, `decodeLevel` and `decodeSearch` in `scripts/lib/map-format.mjs` expand the compact files into plain objects (the viewer and smoke scripts use the same functions). Strip slots follow the fixed channel order `base, foreground, pipes, power, fluid, disposal, transit, disposal-surface, pipes-surface, power-surface, fluid-surface, natural`; a chunk's bitmask says which slots exist, and absent channels occupy no pixels. Compared with the previous per-channel files, a station needs roughly a fifth of the files and well under half of the bytes. A one-cell sprite gutter retains common pixel offsets and oversized sprites across chunk boundaries. Icons larger than the supported 96 × 96 tile composition, or offsets outside that gutter, are omitted. A failed conversion exits nonzero; rerun it before building updated data.
 

@@ -4,38 +4,46 @@ import sharp from 'sharp';
 
 export function dmiMetadata(png) {
   let description = '';
-  for (let offset = 8; offset + 12 <= png.length;) {
-    const size = png.readUInt32BE(offset), type = png.toString('ascii', offset + 4, offset + 8);
+  for (let offset = 8; offset + 12 <= png.length; ) {
+    const size = png.readUInt32BE(offset),
+      type = png.toString('ascii', offset + 4, offset + 8);
     const data = png.subarray(offset + 8, offset + 8 + size);
     if (type === 'zTXt') {
       const end = data.indexOf(0);
-      if (data.toString('utf8', 0, end) === 'Description') description = inflateSync(data.subarray(end + 2)).toString('utf8');
-    } else if (type === 'tEXt' && data.toString('utf8').startsWith('Description\0')) description = data.subarray(12).toString('utf8');
+      if (data.toString('utf8', 0, end) === 'Description')
+        description = inflateSync(data.subarray(end + 2)).toString('utf8');
+    } else if (type === 'tEXt' && data.toString('utf8').startsWith('Description\0'))
+      description = data.subarray(12).toString('utf8');
     offset += size + 12;
   }
   const width = +(description.match(/\bwidth\s*=\s*(\d+)/)?.[1] || 32);
   const height = +(description.match(/\bheight\s*=\s*(\d+)/)?.[1] || 32);
-  const states = new Map(); let offset = 0;
+  const states = new Map();
+  let offset = 0;
   for (const m of description.matchAll(/state\s*=\s*"(.*?)"([\s\S]*?)(?=\nstate\s*=|# END|$)/g)) {
     const dirs = +(m[2].match(/dirs\s*=\s*(\d+)/)?.[1] || 1);
     const frames = +(m[2].match(/frames\s*=\s*(\d+)/)?.[1] || 1);
-    states.set(m[1], { offset, dirs, frames }); offset += dirs * frames;
+    states.set(m[1], { offset, dirs, frames });
+    offset += dirs * frames;
   }
   return { width, height, states };
 }
 
 export function createSpriteReader(root) {
-  const files = new Map(), sprites = new Map();
+  const files = new Map(),
+    sprites = new Map();
   const metadata = new Map();
   function hasState(icon, state) {
     try {
       if (!metadata.has(icon)) metadata.set(icon, dmiMetadata(readFileSync(`${root}/${icon}`)));
       return metadata.get(icon).states.has(state);
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
   const icons = new Set();
   const report = { requested: 0, missingIcon: 0, missingState: 0, samples: [] };
-  async function sprite(icon, state, dir = 2, tint = '', alpha = 255, rotation=0) {
+  async function sprite(icon, state, dir = 2, tint = '', alpha = 255, rotation = 0) {
     const key = JSON.stringify([icon, state, dir, tint, alpha, rotation]);
     if (sprites.has(key)) return sprites.get(key);
     const job = (async () => {
@@ -43,8 +51,12 @@ export function createSpriteReader(root) {
       icons.add(icon);
       try {
         if (!files.has(icon)) {
-          const buffer = readFileSync(`${root}/${icon}`), meta = dmiMetadata(buffer);
-          const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+          const buffer = readFileSync(`${root}/${icon}`),
+            meta = dmiMetadata(buffer);
+          const { data, info } = await sharp(buffer)
+            .ensureAlpha()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
           files.set(icon, { ...meta, data, info });
           if (files.size > 48) files.delete(files.keys().next().value);
         }
@@ -56,27 +68,62 @@ export function createSpriteReader(root) {
           chosen = file.states.get(`${state}-0`) || file.states.get('') || file.states.values().next().value;
         }
         const directions = [2, 1, 4, 8, 6, 10, 5, 9];
-        const frame = (chosen?.offset || 0) + Math.max(0, directions.slice(0, chosen?.dirs || 1).indexOf(+dir));
+        const frame =
+          (chosen?.offset || 0) + Math.max(0, directions.slice(0, chosen?.dirs || 1).indexOf(+dir));
         const cols = Math.floor(file.info.width / file.width);
-        const left = frame % cols * file.width, top = Math.floor(frame / cols) * file.height;
+        const left = (frame % cols) * file.width,
+          top = Math.floor(frame / cols) * file.height;
         if (top + file.height > file.info.height) throw new Error('Frame outside icon');
-        let image = sharp(file.data, { raw: file.info }).extract({ left, top, width: file.width, height: file.height });
+        let image = sharp(file.data, { raw: file.info }).extract({
+          left,
+          top,
+          width: file.width,
+          height: file.height,
+        });
         let { data, info } = await image.raw().toBuffer({ resolveWithObject: true });
-        const color = /^#[\da-f]{6}$/i.test(tint) ? [1, 3, 5].map(n => parseInt(tint.slice(n, n + 2), 16) / 255) : [1, 1, 1];
-        let minX=info.width,minY=info.height,maxX=-1,maxY=-1;
+        const color = /^#[\da-f]{6}$/i.test(tint)
+          ? [1, 3, 5].map((n) => parseInt(tint.slice(n, n + 2), 16) / 255)
+          : [1, 1, 1];
+        let minX = info.width,
+          minY = info.height,
+          maxX = -1,
+          maxY = -1;
         for (let p = 0; p < data.length; p += 4) {
           for (let c = 0; c < 3; c++) data[p + c] *= color[c];
           data[p + 3] *= alpha / 255;
-          if(data[p+3]){const index=p/4,x=index%info.width,y=Math.floor(index/info.width);minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}
+          if (data[p + 3]) {
+            const index = p / 4,
+              x = index % info.width,
+              y = Math.floor(index / info.width);
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+          }
         }
-        let output=sharp(data,{raw:info});if(rotation%360)output=output.rotate(rotation,{background:'#00000000'});
-        const result=await output.png().toBuffer({resolveWithObject:true});
-        return { input:result.data,width:result.info.width,height:result.info.height,offsetX:(info.width-result.info.width)/2,offsetY:(info.height-result.info.height)/2,bounds:maxX<0?null:rotation%360?{x:0,y:0,width:result.info.width,height:result.info.height}:{x:minX,y:minY,width:maxX-minX+1,height:maxY-minY+1} };
+        let output = sharp(data, { raw: info });
+        if (rotation % 360) output = output.rotate(rotation, { background: '#00000000' });
+        const result = await output.png().toBuffer({ resolveWithObject: true });
+        return {
+          input: result.data,
+          width: result.info.width,
+          height: result.info.height,
+          offsetX: (info.width - result.info.width) / 2,
+          offsetY: (info.height - result.info.height) / 2,
+          bounds:
+            maxX < 0
+              ? null
+              : rotation % 360
+                ? { x: 0, y: 0, width: result.info.width, height: result.info.height }
+                : { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 },
+        };
       } catch {
-        report.missingIcon++; return null;
+        report.missingIcon++;
+        return null;
       }
     })();
-    sprites.set(key, job); return job;
+    sprites.set(key, job);
+    return job;
   }
   return { sprite, report, icons, hasState };
 }

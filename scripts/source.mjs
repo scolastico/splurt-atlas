@@ -14,8 +14,11 @@ if (!existsSync(path.join(root, '.git'))) {
   if (from) git(['clone', '--local', '--no-checkout', from, root]);
   else git(['clone', '--filter=blob:none', '--depth=1', '--no-checkout', config.repository, root]);
 }
-try { execFileSync('git', ['cat-file', '-e', `${config.ref}^{commit}`], { cwd: root, stdio: 'ignore' }); }
-catch { git(['fetch', '--depth=1', 'origin', config.ref], root); }
+try {
+  execFileSync('git', ['cat-file', '-e', `${config.ref}^{commit}`], { cwd: root, stdio: 'ignore' });
+} catch {
+  git(['fetch', '--depth=1', 'origin', config.ref], root);
+}
 git(['checkout', '--detach', config.ref], root);
 git(['remote', 'set-url', 'origin', config.repository], root);
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
