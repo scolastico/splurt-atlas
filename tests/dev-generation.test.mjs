@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GenerationController, checkpointBaseline } from '../scripts/dev-generation.mjs';
+import { GenerationController, checkpointBaseline } from '../scripts/dev/dev-generation.mjs';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -130,7 +130,7 @@ test('completed-map checkpoints resume only with matching input hashes and safe 
   }
 });
 test('development converts a small default station subset unless ATLAS_DEV_MAPS widens it', async () => {
-  const { devMaps, DEFAULT_DEV_MAPS } = await import('../scripts/dev-generation.mjs');
+  const { devMaps, DEFAULT_DEV_MAPS } = await import('../scripts/dev/dev-generation.mjs');
   assert.deepEqual(devMaps({}), DEFAULT_DEV_MAPS);
   assert.deepEqual(DEFAULT_DEV_MAPS, ['boxstation', 'northstar', 'icebox']);
   assert.equal(devMaps({ ATLAS_DEV_MAPS: 'all' }), null);

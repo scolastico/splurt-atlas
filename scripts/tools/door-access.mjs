@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { loadTypes } from './lib/dm.mjs';
-import { createDoorResolver } from './lib/door-access.mjs';
+import { loadTypes } from '../lib/dm.mjs';
+import { createDoorResolver } from '../lib/door-access.mjs';
 const manifest = JSON.parse(readFileSync('public/data/manifest.json')),
   root = `public/data/${manifest.dataPath || ''}`,
   source = '.source/S.P.L.U.R.T-tg',

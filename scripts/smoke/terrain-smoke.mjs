@@ -1,4 +1,4 @@
-import { decodeMap, decodeLevel } from './lib/map-format.mjs';
+import { decodeMap, decodeLevel } from '../lib/map-format.mjs';
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';

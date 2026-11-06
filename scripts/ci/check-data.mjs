@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { SCHEMA, LODS, decodeMap, decodeLevel, stripName, maskChannels } from './lib/map-format.mjs';
+import { SCHEMA, LODS, decodeMap, decodeLevel, stripName, maskChannels } from '../lib/map-format.mjs';
 const fail = (message) => {
   console.error(message);
   process.exit(1);

@@ -1,7 +1,7 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { decodeMap, decodeLevel } from './lib/map-format.mjs';
+import { decodeMap, decodeLevel } from '../lib/map-format.mjs';
 
 const url = process.env.ATLAS_URL || 'http://127.0.0.1:5173/';
 mkdirSync('.cache/qa', { recursive: true });

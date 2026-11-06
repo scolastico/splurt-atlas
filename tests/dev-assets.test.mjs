@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createServer } from 'vite';
-import { devAssets, validateDataset } from '../scripts/dev-assets.mjs';
+import { devAssets, validateDataset } from '../scripts/dev/dev-assets.mjs';
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'atlas-dev-'));

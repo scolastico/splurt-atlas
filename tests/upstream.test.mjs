@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldBuild, trustedBaselineRun } from '../scripts/check-upstream.mjs';
+import { shouldBuild, trustedBaselineRun } from '../scripts/ci/check-upstream.mjs';
 test('scheduler compares the release catalog and manual full rebuild bypasses the check', () => {
   assert.equal(shouldBuild('schedule', 'abc', { commit: 'abc' }), false);
   assert.equal(shouldBuild('schedule', 'abc', { commit: 'old' }), true);

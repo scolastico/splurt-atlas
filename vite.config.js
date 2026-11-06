@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import path from 'node:path';
 import { copyPublic } from './scripts/lib/copy-public.mjs';
-import { devAssets } from './scripts/dev-assets.mjs';
+import { devAssets } from './scripts/dev/dev-assets.mjs';
 let output;
 export default defineConfig({
   base: './',

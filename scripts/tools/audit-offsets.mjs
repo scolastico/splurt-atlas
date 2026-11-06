@@ -1,8 +1,8 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { loadTypes } from './lib/dm.mjs';
-import { objectOffsets } from './lib/object-offsets.mjs';
-import { decodeMap } from './lib/map-format.mjs';
+import { loadTypes } from '../lib/dm.mjs';
+import { objectOffsets } from '../lib/object-offsets.mjs';
+import { decodeMap } from '../lib/map-format.mjs';
 
 const db = loadTypes('.source/S.P.L.U.R.T-tg');
 const manifest = JSON.parse(readFileSync('public/data/manifest.json'));

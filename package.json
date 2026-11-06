@@ -13,11 +13,11 @@
     "export": "node scripts/export.mjs",
     "prepare:data": "pnpm source && pnpm export",
     "dev": "vite --host 127.0.0.1",
-    "build": "node scripts/check-data.mjs && node scripts/package-maps.mjs && vite build",
+    "build": "node scripts/ci/check-data.mjs && node scripts/package-maps.mjs && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "tsc --noEmit && node --test tests/*.test.mjs",
     "package:maps": "node scripts/package-maps.mjs",
-    "audit:offsets": "node scripts/audit-offsets.mjs",
+    "audit:offsets": "node scripts/tools/audit-offsets.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit"

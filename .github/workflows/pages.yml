@@ -34,7 +34,7 @@ jobs:
           node-version: 24
       - name: Compare upstream with the last published catalog
         id: check
-        run: node scripts/check-upstream.mjs
+        run: node scripts/ci/check-upstream.mjs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ATLAS_FULL_REBUILD: ${{ inputs.full_rebuild || false }}
@@ -103,7 +103,7 @@ jobs:
       - name: Mark output as a plain static site
         run: touch dist/.nojekyll
       - name: Validate deployment size
-        run: node scripts/check-size.mjs
+        run: node scripts/ci/check-size.mjs
       - name: Summarize incremental conversion
         run: |
           node --input-type=module <<'NODE'

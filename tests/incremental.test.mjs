@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import sharp from 'sharp';
-import { localGenerator, generatorInputs } from '../scripts/dev-generation.mjs';
+import { localGenerator, generatorInputs } from '../scripts/dev/dev-generation.mjs';
 // The fixture workspace carries its own small map set, so development mode must not narrow it to the default station subset.
 process.env.ATLAS_DEV_MAPS = 'all';
 
