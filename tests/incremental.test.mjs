@@ -6,6 +6,8 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import sharp from 'sharp';
 import {localGenerator,generatorInputs} from '../scripts/dev-generation.mjs';
+// The fixture workspace carries its own small map set, so development mode must not narrow it to the default station subset.
+process.env.ATLAS_DEV_MAPS='all';
 
 test('incremental exporter reuses unchanged maps and invalidates map, sprite, inherited-code and missing-asset changes',async()=>{
  const workspace=mkdtempSync(path.join(tmpdir(),'splurt-incremental-'));

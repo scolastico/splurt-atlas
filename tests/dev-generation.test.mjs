@@ -59,3 +59,12 @@ test('completed-map checkpoints resume only with matching input hashes and safe 
   assert.equal(await checkpointBaseline(cache,{key:'same'},'published'),'published');
  }finally{await rm(cache,{recursive:true,force:true});}
 });
+test('development converts a small default station subset unless ATLAS_DEV_MAPS widens it',async()=>{
+ const {devMaps,DEFAULT_DEV_MAPS}=await import('../scripts/dev-generation.mjs');
+ assert.deepEqual(devMaps({}),DEFAULT_DEV_MAPS);
+ assert.deepEqual(DEFAULT_DEV_MAPS,['boxstation','northstar','icebox']);
+ assert.equal(devMaps({ATLAS_DEV_MAPS:'all'}),null);
+ assert.equal(devMaps({ATLAS_DEV_MAPS:' * '}),null);
+ assert.deepEqual(devMaps({ATLAS_DEV_MAPS:'tramstation, metastation,tramstation'}),['tramstation','metastation']);
+ assert.throws(()=>devMaps({ATLAS_DEV_MAPS:'../etc'}),/Invalid map ID/);
+});

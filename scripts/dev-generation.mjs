@@ -17,6 +17,17 @@ export async function checkpointBaseline(cache, input, fallback) {
   return fallback;
 }
 
+// Development converts a small station subset by default so regeneration stays
+// quick. ATLAS_DEV_MAPS takes a comma-separated list of map IDs, or "all".
+export const DEFAULT_DEV_MAPS = ['boxstation', 'northstar', 'icebox'];
+export function devMaps(env = process.env) {
+  const raw = (env.ATLAS_DEV_MAPS ?? '').trim();
+  if (['all', '*'].includes(raw.toLowerCase())) return null;
+  const maps = raw ? raw.split(',').map(id => id.trim()).filter(Boolean) : DEFAULT_DEV_MAPS;
+  for (const id of maps) if (!/^[\w-]+$/.test(id)) throw new Error(`Invalid map ID in ATLAS_DEV_MAPS: ${id}`);
+  return [...new Set(maps)];
+}
+
 export async function generatorInputs(root) {
   const config = await json(path.join(root, 'atlas.config.json'));
   const files = ['scripts/export.mjs', 'scripts/export-parallel.mjs', 'scripts/promote.mjs', 'scripts/package-maps.mjs', 'scripts/source.mjs', 'package.json', 'pnpm-lock.yaml', 'atlas.config.json', 'NOTICE'];
@@ -27,7 +38,8 @@ export async function generatorInputs(root) {
   try { commit = (await exec('git', ['rev-parse', 'HEAD'], { cwd: path.join(root, '.source/S.P.L.U.R.T-tg'), timeout: 10000 })).stdout.trim(); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (!/^[a-f\d]{40}$/.test(commit)) throw new Error('Invalid upstream commit');
-  return { key: hash(JSON.stringify([hashes, commit])), hashes, commit, config };
+  const maps = devMaps();
+  return { key: hash(JSON.stringify([hashes, commit, maps])), hashes, commit, config, maps };
 }
 
 // The controller has no Vite or renderer dependencies, so cancellation and
@@ -136,7 +148,7 @@ export function localGenerator(root) {
         catch { await writeFile(path.join(root, '.source/provenance.json'), JSON.stringify({repository:input.config.repository,commit:input.commit})); }
         const baseline=await checkpointBaseline(cache,input,path.join(root,'public/data'));
         if(baseline!==path.join(root,'public/data'))report({message:'Resuming completed maps from the previous generation checkpoint',percent:0});
-        await command(root, 'scripts/export.mjs', ['--incremental'], signal, { ATLAS_SOURCE_REF: input.commit, ATLAS_STAGE_ONLY: '1', ATLAS_EXPORT_OUTPUT: stage, ATLAS_BASELINE: baseline, ATLAS_REUSE_LINKS: '1',ATLAS_CHECKPOINT:'1' });
+        await command(root, 'scripts/export.mjs', ['--incremental', ...(input.maps || [])], signal, { ATLAS_SOURCE_REF: input.commit, ATLAS_STAGE_ONLY: '1', ATLAS_EXPORT_OUTPUT: stage, ATLAS_BASELINE: baseline, ATLAS_REUSE_LINKS: '1',ATLAS_CHECKPOINT:'1' });
         complete=true;
         phase = 'archive'; started = Date.now();
         report({ message: 'Preparing ZIP downloads; unchanged archives are reused', percent: 90 });
