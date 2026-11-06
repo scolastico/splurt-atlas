@@ -1,6 +1,6 @@
 # S.P.L.U.R.T. Station Atlas
 
-**Live map: [splurt-atlas.scolasti.co](https://splurt-atlas.scolasti.co)**
+**Live map: [splurt-atlas.scolasti.co](https://splurt-atlas.scolasti.co/index.html)**
 
 [GitHub Pages mirror](https://scolastico.github.io/splurt-atlas/) - much slower and not recommended; use the R2 site above.
 
@@ -94,7 +94,7 @@ The project repository is [scolastico/splurt-atlas](https://github.com/scolastic
 
 The same non-PR build is also mirrored to R2 in a separate CI job. Configure Actions secrets `R2_ACCESS_KEY_ID` (access key ID), `R2_ACCESS_KEY` (secret access key), and `R2_ENDPOINT` (HTTPS S3 API endpoint). Set repository variable `R2_BUCKET` to the destination bucket, and optionally `R2_PREFIX` to a directory inside it. An endpoint containing `/bucket/prefix` can supply the destination instead; explicit variables must agree with the endpoint bucket. The bucket or prefix is dedicated to this site: files absent from the new build are removed there.
 
-This repository deploys to the root of bucket `splurt-atlas`, served at [splurt-atlas.scolasti.co](https://splurt-atlas.scolasti.co).
+This repository deploys to the root of bucket `splurt-atlas`, served at [splurt-atlas.scolasti.co/index.html](https://splurt-atlas.scolasti.co/index.html). To serve the same page at `/`, add a Cloudflare URL Rewrite Rule matching `http.host eq "splurt-atlas.scolasti.co" and http.request.uri.path eq "/"`, rewriting the path to `/index.html` and preserving the query string. This domain-level rule cannot be configured using R2 S3 access keys.
 
 Deployment uses rclone's S3-compatible Cloudflare backend and checksums to avoid re-uploading identical files even when artifact timestamps change. It uploads changed files, removes obsolete objects after successful transfers, and publishes `data/manifest.json` and `index.html` last. An incomplete local build or an unspecified bucket is rejected before any sync. Credentials are provided through environment variables without writing a credentials file. Mutable URLs receive revalidation headers; the viewer's IndexedDB cache handles map-resource reuse. The R2 bucket's public domain or Worker routing is configured separately in Cloudflare, including serving `index.html` for the site root. CI does not change bucket access settings or domain routing.
 
