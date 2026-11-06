@@ -18,8 +18,9 @@ import { share } from './url-state.ts';
 
 const MIN_ZOOM = 0.04;
 const MAX_ZOOM = 5;
-/** Keyboard panning distance in screen pixels. */
-const KEY_PAN_PIXELS = 90;
+/** Keyboard panning: top speed in screen pixels per second and the time to reach it. */
+const KEY_PAN_SPEED = 900;
+const KEY_PAN_RAMP_MS = 260;
 
 /** Centers the station's non-space area and zooms to fit it beside the sidebar. */
 export function fit(): void {
@@ -182,11 +183,57 @@ function onKeyDown(event: KeyboardEvent): void {
     if (state.selected) clearSelection();
     else setSidebarCollapsed(true);
   }
-  const shift = PAN_KEYS[event.key.length === 1 ? event.key.toLowerCase() : event.key];
-  if (shift) {
+  const panKey = PAN_KEYS[event.key.length === 1 ? event.key.toLowerCase() : event.key];
+  if (panKey) {
     event.preventDefault();
-    panBy((shift[0] * KEY_PAN_PIXELS) / state.zoom, (shift[1] * KEY_PAN_PIXELS) / state.zoom);
+    if (!event.repeat) pressPanKey(event.key);
   }
+}
+
+// Held keys move the camera every frame, like walking a ghost around the map:
+// the speed ramps up briefly after the first press and diagonal movement is
+// not faster than straight movement.
+const heldPanKeys = new Set<string>();
+let panFrame = 0;
+let panStarted = 0;
+let lastPanTime = 0;
+
+function normalizePanKey(key: string): string {
+  return key.length === 1 ? key.toLowerCase() : key;
+}
+
+function pressPanKey(key: string): void {
+  heldPanKeys.add(normalizePanKey(key));
+  if (panFrame) return;
+  panStarted = lastPanTime = performance.now();
+  panFrame = requestAnimationFrame(stepPan);
+}
+
+function releasePanKey(key: string): void {
+  heldPanKeys.delete(normalizePanKey(key));
+}
+
+function stepPan(now: number): void {
+  panFrame = 0;
+  if (!heldPanKeys.size) return;
+  let dx = 0;
+  let dy = 0;
+  for (const key of heldPanKeys) {
+    dx += PAN_KEYS[key][0];
+    dy += PAN_KEYS[key][1];
+  }
+  const length = Math.hypot(dx, dy);
+  const ramp = Math.min(1, (now - panStarted) / KEY_PAN_RAMP_MS);
+  const speed = KEY_PAN_SPEED * ramp * ramp;
+  const seconds = Math.min(0.1, (now - lastPanTime) / 1000);
+  lastPanTime = now;
+  if (length)
+    panBy(((dx / length) * speed * seconds) / state.zoom, ((dy / length) * speed * seconds) / state.zoom);
+  panFrame = requestAnimationFrame(stepPan);
+}
+
+function stopPanning(): void {
+  heldPanKeys.clear();
 }
 
 /** Mouse back and forward buttons step through the in-app history instead of the browser's. */
@@ -209,4 +256,6 @@ export function initCameraControls(): void {
   $('zoom-out').onclick = () => zoomBy(1 / 1.5);
   $('fit').onclick = fit;
   document.onkeydown = onKeyDown;
+  document.addEventListener('keyup', (event) => releasePanKey(event.key));
+  window.addEventListener('blur', stopPanning);
 }
