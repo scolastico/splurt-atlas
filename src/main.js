@@ -316,8 +316,13 @@ function drawDeckTiles(z,shade){
   const sources=set.items.map(item=>tileSources(z,item));
   renderer.beginDeck(shade);
   for(const channel of deckChannels(z))for(const [index,item]of set.items.entries())for(const source of sources[index]){
-    const slot=slotIndex(source.mask,channel==='base'&&natural&&hasChannel(source.mask,'natural')?'natural':channel);if(slot<0)continue;
-    renderer.draw(source.handle,slot,source.sx,source.sy,source.sw,source.sh,((item.x-state.x)*scale+centerX)*dpr,((item.y-state.y)*scale+centerY)*dpr,item.w*scale*dpr,item.h*scale*dpr);
+    const slot=slotIndex(source.mask,channel);if(slot<0)continue;
+    const dx=((item.x-state.x)*scale+centerX)*dpr,dy=((item.y-state.y)*scale+centerY)*dpr,dw=item.w*scale*dpr,dh=item.h*scale*dpr;
+    renderer.draw(source.handle,slot,source.sx,source.sy,source.sw,source.sh,dx,dy,dw,dh);
+    // Generated terrain is layered over the base rather than replacing it: a coarser
+    // strip carries terrain only in the quadrants whose chunks had placeholder turfs,
+    // and the rest of that slot is transparent.
+    if(channel==='base'&&natural){const terrain=slotIndex(source.mask,'natural');if(terrain>=0)renderer.draw(source.handle,terrain,source.sx,source.sy,source.sw,source.sh,dx,dy,dw,dh);}
     break;
   }
   renderer.endDeck();
