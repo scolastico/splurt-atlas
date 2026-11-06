@@ -52,3 +52,25 @@ export function smoothAtoms(atoms, x, y, z, at, db) {
     return { ...atom, vars: { ...atom.vars, icon_state: `"${base}-${mask}"` } };
   });
 }
+// Random posters pick a real poster at map load (/obj/structure/sign/poster/randomise),
+// so the mapped placeholder sprite never appears in the game. The pick is
+// deterministic per tile so incremental exports and shared links stay stable.
+const posterPools=new WeakMap();
+export function randomisePosters(atoms,x,y,z,db){
+  return atoms.map(atom=>{
+    if(!/^\/obj\/structure\/sign\/poster(?:\/|$)/.test(atom.path))return atom;
+    const vars={...db.resolve(atom.path),...atom.vars};if(!vars.random_basetype)return atom;
+    const pool=posterPool(db,vars.random_basetype,vars.blacklisted_types);if(!pool.length)return atom;
+    const chosen=db.resolve(pool[(((x*73856093)^(y*19349663)^(z*83492791))>>>0)%pool.length]);
+    return{...atom,vars:{...atom.vars,icon:chosen.icon,icon_state:chosen.icon_state}};
+  });
+}
+function posterPool(db,base,blacklist){
+  if(!posterPools.has(db))posterPools.set(db,new Map());
+  const cache=posterPools.get(db),key=`${base}|${blacklist||''}`;if(cache.has(key))return cache.get(key);
+  const literal=value=>String(db.literal?db.literal(String(value??'')):value??''),flag=value=>['TRUE','1'].includes(literal(value)),shifted=value=>Number(literal(value||'0'))!==0;
+  const banned=[...String(blacklist||'').matchAll(/\/obj\/[\w/]+/g)].map(match=>match[0]);
+  // Same rules as the game: an icon state, not banned from the pool, and not pixel shifted (excludes directional helpers).
+  const pool=[...db.types.keys()].filter(type=>type.startsWith(`${base}/`)&&!banned.some(ban=>type===ban||type.startsWith(`${ban}/`))).filter(type=>{const v=db.resolve(type);return v.icon_state&&!flag(v.never_random)&&!shifted(v.pixel_x)&&!shifted(v.pixel_y);}).sort();
+  cache.set(key,pool);return pool;
+}

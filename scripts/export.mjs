@@ -6,7 +6,7 @@ import sharp from 'sharp';
 import { parseDmm } from './lib/dmm.mjs';
 import { loadTypes, unquote, pretty, classify, aperture } from './lib/dm.mjs';
 import { createSpriteReader } from './lib/dmi.mjs';
-import { expandStructures, smoothAtoms } from './lib/appearance.mjs';
+import { expandStructures, smoothAtoms, randomisePosters } from './lib/appearance.mjs';
 import { promote } from './promote.mjs';
 import { writeStrip, buildPyramid } from './lib/image-pyramid.mjs';
 import { CHANNELS, OVERVIEW_TERRAIN, channelMask, stripName, encodeMap, encodeLevel, encodeSearch, levelBounds, SCHEMA } from './lib/map-format.mjs';
@@ -143,7 +143,7 @@ for (const id of selected) {
   const expanded = new Map([...dictionary].map(([key, atoms]) => [key, expandStructures(atoms, db)]));
   const spatial = new Map(cells.map(cell => [`${cell.x},${cell.y},${cell.z}`, expanded.get(cell.key)]));
   const at = (x, y, z) => spatial.get(`${x},${y},${z}`);
-  for (const cell of cells) cell.appearance = smoothAtoms(expanded.get(cell.key), cell.x, cell.y, cell.z, at, db);
+  for (const cell of cells) cell.appearance = randomisePosters(smoothAtoms(expanded.get(cell.key), cell.x, cell.y, cell.z, at, db), cell.x, cell.y, cell.z, db);
   const infrastructure=buildInfrastructure(cells,at,db,levels);
   const defs = [], keyIds = new Map(), areaMap = new Map(), areas = [], items = [], unresolved = [];
   const getArea = type => {
