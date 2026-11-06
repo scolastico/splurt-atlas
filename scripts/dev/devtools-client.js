@@ -99,6 +99,7 @@ label.row small { color: #6f8191; }
     if (job?.phase === 'error') return { kind: 'error', text: 'Generation failed' };
     if (status.external) return { kind: 'running', text: 'An export is running in another process' };
     if (status.generation?.stale) return { kind: 'stale', text: 'Map data is out of date' };
+    if (status.upstream?.behind) return { kind: 'stale', text: 'Upstream has new commits' };
     return { kind: 'fresh', text: 'Map data is current' };
   }
 
@@ -316,6 +317,16 @@ label.row small { color: #6f8191; }
             await this.loadSnapshots();
           }
           return;
+        case 'upstream-check':
+          return api('upstream/check', {});
+        case 'upstream-pull':
+          if (
+            confirm(
+              'Fetch the latest upstream commit into .source and check it out? Your local atlas data stays until you regenerate.',
+            )
+          )
+            return api('upstream/pull', {});
+          return;
         case 'copy-link':
           await navigator.clipboard.writeText(location.href);
           return;
@@ -404,6 +415,8 @@ label.row small { color: #6f8191; }
               <dd>${escape(dataset.maps.map((map) => map.name).join(', '))}</dd>
             </dl>`
           : html`<div class="muted">No catalog is published yet.</div>`}
+        <h2>Upstream</h2>
+        ${this.renderUpstream()}
         <h2>Next generation</h2>
         <dl>
           <dt>Maps</dt>
@@ -493,7 +506,72 @@ label.row small { color: #6f8191; }
         <p class="muted">
           Saved selections live in <code>.cache/dev-settings.json</code> and override
           <code>ATLAS_DEV_MAPS</code>.
-        </p>`;
+        </p>
+        ${this.renderOmitted()}`;
+    }
+
+    renderUpstream() {
+      const upstream = this.status?.upstream;
+      const busy = this.status?.generation?.job?.phase === 'running';
+      if (!upstream) return html`<p class="muted">The upstream repository has not been checked yet.</p>`;
+      const rows = html`<dl>
+        <dt>Repository</dt>
+        <dd>
+          ${escape(upstream.repository || 'unknown')}${upstream.custom
+            ? ' <span class="muted">(the checkout points elsewhere; it is left alone)</span>'
+            : ''}
+        </dd>
+        <dt>Local</dt>
+        <dd><code>${escape((upstream.local || '').slice(0, 12) || '-')}</code></dd>
+        ${upstream.custom
+          ? ''
+          : html`<dt>Latest</dt>
+              <dd>
+                <code>${escape((upstream.remote || '').slice(0, 12) || '-')}</code>${upstream.branch
+                  ? ` on ${escape(upstream.branch)}`
+                  : ''}
+              </dd>`}
+        <dt>Checked</dt>
+        <dd>${escape(ago(upstream.checked))}, repeats daily</dd>
+      </dl>`;
+      let note = '';
+      if (upstream.error) note = html`<div class="notice error">${escape(upstream.error)}</div>`;
+      else if (upstream.behind)
+        note = html`<div class="notice stale">
+          <strong>Upstream has new commits.</strong> Pulling moves the checkout to the latest default-branch
+          commit; the data then counts as out of date and a regeneration converts the new maps.
+        </div>`;
+      return html`${note}${rows}
+        <div class="actions">
+          <button class="btn" data-action="upstream-check">Check now</button>
+          <button
+            class="btn primary"
+            data-action="upstream-pull"
+            ${upstream.behind && !upstream.custom && !busy ? '' : 'disabled'}
+          >
+            Pull latest
+          </button>
+        </div>`;
+    }
+
+    renderOmitted() {
+      const omitted = this.status?.maps?.omitted || [];
+      if (!omitted.length) return '';
+      return html`<h2>Upstream maps not converted</h2>
+        <p class="muted">These configurations exist in the checkout but the atlas does not convert them.</p>
+        <ul>
+          ${omitted
+            .map(
+              (map) =>
+                html`<li>
+                  <strong>${escape(map.name)}</strong> <span class="muted">${escape(map.id)}</span><br /><span
+                    class="muted"
+                    >${escape(map.hint)}</span
+                  >
+                </li>`,
+            )
+            .join('')}
+        </ul>`;
     }
 
     renderProgress() {

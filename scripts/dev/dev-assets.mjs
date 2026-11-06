@@ -7,7 +7,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_DEV_MAPS,
-  availableStations,
+  checkUpstream,
+  pullUpstream,
+  readUpstreamCheck,
+  upstreamStations,
   deleteSnapshot,
   devMaps,
   listSnapshots,
@@ -38,6 +41,8 @@ const alive = (pid) => {
 const DEVTOOLS_CLIENT = fileURLToPath(new URL('./devtools-client.js', import.meta.url));
 /** The station list is re-read from the checkout at most this often. */
 const STATIONS_CACHE_MS = 10000;
+/** The upstream repository is checked for new commits about once a day. */
+const UPSTREAM_CHECK_MS = 24 * 60 * 60 * 1000;
 
 /** The page shown while no usable dataset exists yet (cold start or a broken export). */
 export function loadingPage() {
@@ -139,7 +144,21 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
         checking = false,
         externalExport = null,
         retryAfter = 0;
-      let stationsCache = { time: 0, stations: [] };
+      let stationsCache = { time: 0, stations: { stations: [], omitted: [] } };
+      let upstream = null;
+      let upstreamBusy = null;
+      const refreshUpstream = async (force = false) => {
+        if (upstreamBusy) return upstreamBusy;
+        if (!upstream) upstream = await readUpstreamCheck(root);
+        if (!force && upstream && Date.now() - upstream.checked < UPSTREAM_CHECK_MS) return upstream;
+        upstreamBusy = checkUpstream(root)
+          .then((result) => (upstream = result))
+          .finally(() => (upstreamBusy = null));
+        return upstreamBusy;
+      };
+      void refreshUpstream();
+      const upstreamTimer = setInterval(() => void refreshUpstream(), 60 * 60 * 1000);
+      upstreamTimer.unref();
 
       const refresh = async () => {
         if (checking) return;
@@ -192,12 +211,13 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
       timer.unref();
       server.httpServer?.once('close', () => {
         clearInterval(timer);
+        clearInterval(upstreamTimer);
         void generation?.close?.();
       });
 
       const stations = async () => {
         if (Date.now() - stationsCache.time > STATIONS_CACHE_MS)
-          stationsCache = { time: Date.now(), stations: await availableStations(root) };
+          stationsCache = { time: Date.now(), stations: await upstreamStations(root) };
         return stationsCache.stations;
       };
 
@@ -242,8 +262,10 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
             saved: settings.maps !== undefined,
             environment: process.env.ATLAS_DEV_MAPS ?? null,
             defaults: DEFAULT_DEV_MAPS,
-            available: await stations(),
+            available: (await stations()).stations,
+            omitted: (await stations()).omitted,
           },
+          upstream,
         };
       };
 
@@ -266,13 +288,20 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
           let maps = null;
           if (body.maps !== null) {
             if (!Array.isArray(body.maps)) throw new Error('maps must be an array or null');
-            const known = new Set((await stations()).map((station) => station.id));
+            const known = new Set((await stations()).stations.map((station) => station.id));
             maps = [...new Set(body.maps.map(String))];
             for (const id of maps) if (!known.has(id)) throw new Error(`Unknown map: ${id}`);
           }
           await writeDevSettings(root, { ...(await readDevSettings(root)), maps });
           stationsCache.time = 0;
           sendJson(res, 200, { maps });
+        },
+        'POST /__atlas_dev/upstream/check': async (req, res) =>
+          sendJson(res, 200, await refreshUpstream(true)),
+        'POST /__atlas_dev/upstream/pull': async (req, res) => {
+          if (upstreamBusy) await upstreamBusy;
+          upstream = await pullUpstream(root);
+          sendJson(res, 200, upstream);
         },
         'GET /__atlas_dev/snapshots': async (req, res) => sendJson(res, 200, await listSnapshots(root)),
         'POST /__atlas_dev/snapshots/delete': async (req, res) => {

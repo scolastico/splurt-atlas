@@ -1,5 +1,6 @@
 // Camera movement: fitting the station, zooming, and the pointer, wheel and
 // keyboard controls on the map canvas.
+import { goBack, goForward } from './history.ts';
 import { mapCanvas } from '../rendering/canvases.ts';
 import { $ } from '../core/dom.ts';
 import { redraw } from '../core/frame.ts';
@@ -67,6 +68,8 @@ function initPointerControls(): void {
   };
 
   mapCanvas.onpointerdown = (event) => {
+    // The mouse back and forward buttons never start a drag.
+    if (event.button === 3 || event.button === 4) return;
     tapCandidate = null;
     mapCanvas.focus();
     mapCanvas.setPointerCapture(event.pointerId);
@@ -140,11 +143,16 @@ function initPointerControls(): void {
   };
 }
 
-const ARROW_SHIFTS: Record<string, [number, number]> = {
+/** Arrow keys and WASD pan the map. */
+const PAN_KEYS: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0],
   ArrowRight: [1, 0],
   ArrowUp: [0, -1],
   ArrowDown: [0, 1],
+  a: [-1, 0],
+  d: [1, 0],
+  w: [0, -1],
+  s: [0, 1],
 };
 
 function onKeyDown(event: KeyboardEvent): void {
@@ -159,6 +167,14 @@ function onKeyDown(event: KeyboardEvent): void {
     showSidebarView('search');
     $('search').focus();
   }
+  // Alt+arrows step through the in-app history; the browser history is untouched.
+  if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+    event.preventDefault();
+    if (event.key === 'ArrowLeft') goBack();
+    else goForward();
+    return;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key.toLowerCase() === 'f') fit();
   if (event.key === '+' || event.key === '=') zoomBy(1.4);
   if (event.key === '-') zoomBy(1 / 1.4);
@@ -166,15 +182,29 @@ function onKeyDown(event: KeyboardEvent): void {
     if (state.selected) clearSelection();
     else setSidebarCollapsed(true);
   }
-  const shift = ARROW_SHIFTS[event.key];
+  const shift = PAN_KEYS[event.key.length === 1 ? event.key.toLowerCase() : event.key];
   if (shift) {
     event.preventDefault();
     panBy((shift[0] * KEY_PAN_PIXELS) / state.zoom, (shift[1] * KEY_PAN_PIXELS) / state.zoom);
   }
 }
 
+/** Mouse back and forward buttons step through the in-app history instead of the browser's. */
+function initHistoryButtons(): void {
+  document.addEventListener('mouseup', (event) => {
+    if (event.button === 3 || event.button === 4) event.preventDefault();
+  });
+  document.addEventListener('auxclick', (event) => {
+    if (event.button !== 3 && event.button !== 4) return;
+    event.preventDefault();
+    if (event.button === 3) goBack();
+    else goForward();
+  });
+}
+
 export function initCameraControls(): void {
   initPointerControls();
+  initHistoryButtons();
   $('zoom-in').onclick = () => zoomBy(1.5);
   $('zoom-out').onclick = () => zoomBy(1 / 1.5);
   $('fit').onclick = fit;

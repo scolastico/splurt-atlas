@@ -10,6 +10,7 @@ import { $, escapeHtml, isChecked } from '../core/dom.ts';
 import { redraw } from '../core/frame.ts';
 import { clearImages, setWarmImages } from '../rendering/images.ts';
 import { invalidateUtilityPaths } from '../rendering/infrastructure-overlay.ts';
+import { recordJump, resetHistory, withoutHistory } from './history.ts';
 import { clearSelection, inspect } from './inspector.ts';
 import { showSidebarView } from './layout.ts';
 import { clearLoadingError, setLoading, showLoadingError } from './loading.ts';
@@ -153,7 +154,9 @@ export async function loadStation(id: string, restore = false): Promise<void> {
     renderDeckButtons(map);
     setDeck(state.z);
     fit();
-    if (restore) restoreView(map, params);
+    resetHistory();
+    if (restore) withoutHistory(() => restoreView(map, params));
+    recordJump();
     // The loading overlay stays until a finding from the URL is restored, so
     // a visible station always has a complete, consistent state and URL.
     const searchBytes = await fetchBytes(`${id}/search.json`);

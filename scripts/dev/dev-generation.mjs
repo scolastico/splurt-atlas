@@ -89,29 +89,150 @@ export async function writeDevSettings(root, settings) {
   await writeFile(settingsFile(root), JSON.stringify(settings, null, 2));
 }
 
-/** Every station of the local checkout that the configuration allows, with its display name. */
-export async function availableStations(root) {
+/**
+ * Every map configuration of the local checkout, split into the stations the
+ * atlas converts and the ones it leaves out, each with the reason and a hint.
+ */
+export async function upstreamStations(root) {
   const source = path.join(root, SOURCE_ROOT);
   let config = {};
   try {
     config = await json(path.join(root, 'atlas.config.json'));
   } catch {}
   const excluded = new Set(config.excludeMaps || []);
+  const listed = Array.isArray(config.maps) ? new Set(config.maps) : null;
   let ids = [];
   try {
     ids = availableMapIds(source);
   } catch {
-    return [];
+    return { stations: [], omitted: [] };
   }
   const stations = [];
+  const omitted = [];
   for (const id of ids) {
-    if (excluded.has(id)) continue;
+    let station;
     try {
-      const station = readStationConfig(source, id);
-      if (isStationConfig(station)) stations.push({ id, name: station.map_name || id });
-    } catch {}
+      station = readStationConfig(source, id);
+    } catch {
+      omitted.push({ id, name: id, reason: 'invalid', hint: `_maps/${id}.json could not be read.` });
+      continue;
+    }
+    const name = station.map_name || id;
+    if (!isStationConfig(station))
+      omitted.push({
+        id,
+        name,
+        reason: 'not-station',
+        hint: `_maps/${id}.json names no map_path and map_file, so there is nothing to render.`,
+      });
+    else if (excluded.has(id))
+      omitted.push({
+        id,
+        name,
+        reason: 'excluded',
+        hint: `Remove "${id}" from excludeMaps in atlas.config.json to convert it.`,
+      });
+    else if (listed && !listed.has(id))
+      omitted.push({
+        id,
+        name,
+        reason: 'not-listed',
+        hint: `Add "${id}" to maps in atlas.config.json (or set maps to "all") to convert it.`,
+      });
+    else stations.push({ id, name });
   }
-  return stations.sort((a, b) => a.name.localeCompare(b.name));
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  return { stations: stations.sort(byName), omitted: omitted.sort(byName) };
+}
+
+/** Every station of the local checkout that the configuration allows, with its display name. */
+export async function availableStations(root) {
+  return (await upstreamStations(root)).stations;
+}
+
+// --- Upstream checks ----------------------------------------------------------
+
+const UPSTREAM_CHECK_FILE = '.cache/dev-upstream-check.json';
+const normalizeRepository = (url) =>
+  String(url || '')
+    .trim()
+    .replace(/\.git$/, '')
+    .replace(/\/$/, '')
+    .toLowerCase();
+
+export async function readUpstreamCheck(root) {
+  try {
+    return await json(path.join(root, UPSTREAM_CHECK_FILE));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compares the local checkout with the default branch of the configured
+ * repository. A checkout that points elsewhere is reported as custom and
+ * left alone. The result is saved so the check runs about once a day.
+ */
+export async function checkUpstream(root) {
+  const source = path.join(root, SOURCE_ROOT);
+  let config = {};
+  try {
+    config = await json(path.join(root, 'atlas.config.json'));
+  } catch {}
+  const result = {
+    checked: Date.now(),
+    repository: config.repository || null,
+    local: null,
+    remote: null,
+    branch: null,
+    behind: false,
+    custom: false,
+    error: null,
+  };
+  try {
+    const origin = (
+      await exec('git', ['remote', 'get-url', 'origin'], { cwd: source, timeout: 10000 })
+    ).stdout.trim();
+    result.custom = normalizeRepository(origin) !== normalizeRepository(config.repository);
+    result.local = (await exec('git', ['rev-parse', 'HEAD'], { cwd: source, timeout: 10000 })).stdout.trim();
+    if (!result.custom) {
+      const listing = (
+        await exec('git', ['ls-remote', '--symref', 'origin', 'HEAD'], { cwd: source, timeout: 60000 })
+      ).stdout;
+      result.branch = listing.match(/^ref: refs\/heads\/(\S+)\tHEAD/m)?.[1] || null;
+      result.remote = listing.match(/^([a-f\d]{40})\tHEAD/m)?.[1] || null;
+      result.behind = !!result.remote && result.remote !== result.local;
+    }
+  } catch (error) {
+    result.error = error.message;
+  }
+  try {
+    await mkdir(path.join(root, '.cache'), { recursive: true });
+    await writeFile(path.join(root, UPSTREAM_CHECK_FILE), JSON.stringify(result, null, 2));
+  } catch {}
+  return result;
+}
+
+/** Moves the checkout to the latest default-branch commit of the configured repository. */
+export async function pullUpstream(root) {
+  const source = path.join(root, SOURCE_ROOT);
+  const check = await checkUpstream(root);
+  if (check.error) throw new Error(check.error);
+  if (check.custom)
+    throw new Error('The checkout does not point at the configured repository; pull it yourself.');
+  if (!check.remote) throw new Error('The remote default branch could not be determined.');
+  if (!check.behind) return check;
+  await exec('git', ['fetch', '--depth=1', 'origin', check.remote], {
+    cwd: source,
+    timeout: 900000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  await exec('git', ['checkout', '--detach', check.remote], {
+    cwd: source,
+    timeout: 120000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  return checkUpstream(root);
 }
 
 // --- Generator inputs ---------------------------------------------------------

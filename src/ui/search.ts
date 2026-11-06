@@ -164,6 +164,13 @@ export function clearFinding(): void {
   $('search-findings').hidden = true;
 }
 
+/** Shows a finding of a search record again, as the in-app history does. */
+export function showFinding(id: string, index: number, tile: string | null): void {
+  if (!state.searchReady) return;
+  locationTarget = { id, index, tile };
+  worker?.postMessage({ type: 'locations', id, seq: ++locationSeq });
+}
+
 /** Asks the worker which random spawns are recorded on a tile; the inspector shows the reply. */
 export function requestTileCandidates(x: number, y: number, z: number): void {
   if (state.searchReady) worker?.postMessage({ type: 'tile', tile: `${x},${y},${z}`, seq: ++tileSeq });

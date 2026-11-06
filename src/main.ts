@@ -8,6 +8,7 @@ import { initDoorRoles } from './ui/door-roles.ts';
 import { $, checkbox } from './core/dom.ts';
 import { redraw } from './core/frame.ts';
 import { initNetworkControls } from './rendering/infrastructure-overlay.ts';
+import { initHistory } from './ui/history.ts';
 import { clearInspectedResult, initInspector, paintInspector } from './ui/inspector.ts';
 import { initLayout, showSidebarView } from './ui/layout.ts';
 import { showLoadingError } from './ui/loading.ts';
@@ -119,6 +120,7 @@ initSearch(() => {
   paintInspector();
 });
 initInspector();
+initHistory();
 initCameraControls();
 initRender();
 initOptionSharing();

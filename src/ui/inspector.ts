@@ -5,6 +5,7 @@ import { $, escapeHtml, isChecked } from '../core/dom.ts';
 import { redraw } from '../core/frame.ts';
 import { setSidebarCollapsed, showSidebarView } from './layout.ts';
 import { tileCenterX, tileCenterY } from '../rendering/projection.ts';
+import { recordJump } from './history.ts';
 import { clearFinding, requestTileCandidates } from './search.ts';
 import { definitionAt, networkNames, palette, state } from '../core/state.ts';
 import { setDeck } from './station.ts';
@@ -430,6 +431,7 @@ export function inspect(
   requestTileCandidates(x, y, z);
   redraw();
   share();
+  recordJump();
 }
 
 export function initInspector(): void {
