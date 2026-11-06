@@ -160,9 +160,14 @@ jobs:
             }
             // GITHUB_TOKEN pushes do not themselves trigger branch-based Pages builds.
             await github.rest.repos.requestPagesBuild(context.repo);
-  publish-r2:
+  # Station folders upload from a few parallel jobs; the site job then removes
+  # obsolete objects and publishes the catalog and entry page last.
+  publish-r2-maps:
     if: github.event_name != 'pull_request'
     needs: build
+    strategy:
+      matrix:
+        shard: [0, 1, 2, 3]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -186,7 +191,7 @@ jobs:
           unzip -q "$archive"
           sudo install -m 755 "rclone-v${version}-linux-amd64/rclone" /usr/local/bin/rclone
           rclone version
-      - name: Mirror static site to R2
+      - name: Upload station files to R2
         run: node scripts/deploy-r2.mjs
         env:
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
@@ -194,3 +199,41 @@ jobs:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
           R2_PREFIX: ${{ vars.R2_PREFIX }}
+          R2_STAGE: maps
+          R2_SHARD: ${{ matrix.shard }}
+          R2_SHARDS: 4
+  publish-r2:
+    if: github.event_name != 'pull_request'
+    needs: publish-r2-maps
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: station-atlas
+          path: dist
+      - name: Install S3-compatible sync tool
+        run: |
+          version=1.75.2
+          archive="rclone-v${version}-linux-amd64.zip"
+          cd "$RUNNER_TEMP"
+          curl --fail --silent --show-error --location --retry 3 --output "$archive" "https://downloads.rclone.org/v${version}/$archive"
+          curl --fail --silent --show-error --location --retry 3 --output SHA256SUMS "https://downloads.rclone.org/v${version}/SHA256SUMS"
+          grep " $archive$" SHA256SUMS | sha256sum --check --strict
+          unzip -q "$archive"
+          sudo install -m 755 "rclone-v${version}-linux-amd64/rclone" /usr/local/bin/rclone
+          rclone version
+      - name: Publish site files to R2
+        run: node scripts/deploy-r2.mjs
+        env:
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PREFIX: ${{ vars.R2_PREFIX }}
+          R2_STAGE: site

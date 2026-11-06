@@ -91,8 +91,8 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
       const timer = setInterval(refresh, 1000); timer.unref();
       server.httpServer?.once('close', () => { clearInterval(timer); void generation?.close(); });
       server.middlewares.use(async (req, res, next) => {
-        let pathname;
-        try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); } catch { res.writeHead(400).end(); return; }
+        let pathname, versioned;
+        try { const url = new URL(req.url, 'http://localhost'); pathname = decodeURIComponent(url.pathname); versioned = url.searchParams.has('v'); } catch { res.writeHead(400).end(); return; }
         if (pathname === '/__atlas_dev/retry') {
           if (req.method !== 'POST') { res.writeHead(405).end(); return; }
           generation?.invalidate(); res.writeHead(204).end(); void refresh(); return;
@@ -111,7 +111,8 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
           if (!info.isFile()) { if (dataRequest) { res.writeHead(404).end(); return; } next(); return; }
           const etag = `W/"${info.size}-${info.mtimeMs}"`;
           res.setHeader('Content-Type', types[path.extname(file)] || 'application/octet-stream');
-          res.setHeader('Cache-Control', 'no-cache'); res.setHeader('ETag', etag);
+          // Version-stamped map files never change under the same query string.
+          res.setHeader('Cache-Control', dataRequest && versioned ? 'public, max-age=31536000, immutable' : 'no-cache'); res.setHeader('ETag', etag);
           if (req.headers['if-none-match'] === etag) { res.writeHead(304).end(); return; }
           res.setHeader('Content-Length', info.size);
           if (req.method === 'HEAD') { res.end(); return; }
