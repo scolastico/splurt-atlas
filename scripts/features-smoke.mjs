@@ -1,3 +1,4 @@
+import {decodeMap,decodeLevel} from './lib/map-format.mjs';
 import {chromium} from '@playwright/test';import assert from 'node:assert/strict';import {mkdirSync,writeFileSync} from 'node:fs';
 const url=process.env.ATLAS_URL||'http://127.0.0.1:5173/',browser=await chromium.launch({headless:false}),page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
 await page.addInitScript(()=>{localStorage.setItem('atlas-storage-mode','none');window.__deckLabels=[];const fill=CanvasRenderingContext2D.prototype.fillText;CanvasRenderingContext2D.prototype.fillText=function(text,...args){if(this.canvas.id==='connection-overlay'&&/^(Stairs|Ladder):/.test(text))window.__deckLabels.push(text);return fill.call(this,text,...args);};});
@@ -6,12 +7,11 @@ try{
  assert.equal(await page.locator('#regions').evaluate(el=>getComputedStyle(el.closest('label')).userSelect),'none');
  const grip=await page.locator('#sidebar-resize').boundingBox();await page.mouse.move(grip.x+grip.width/2,400);await page.mouse.down();await page.mouse.move(460,400,{steps:10});await page.mouse.up();assert.ok((await page.locator('#sidebar').boundingBox()).width>=450);await page.locator('#sidebar-resize').dblclick();await page.waitForTimeout(250);
  assert.equal(await page.getByLabel('Transit tubes',{exact:true}).isChecked(),true);assert.equal(await page.locator('#viewport .map-tools').count(),1);assert.equal(await page.locator('#viewport .floating-decks').count(),1);
- const fixture=await page.evaluate(async()=>{
-  const manifest=await fetch(new URL('data/manifest.json',document.baseURI)).then(r=>r.json());const root=new URL(`data/${manifest.dataPath||''}`,document.baseURI),meta=await fetch(new URL('tramstation/map.json',root)).then(r=>r.json());
-  const doorId=meta.definitions.findIndex(def=>def.atoms.some(a=>a.doorAccess?.kind==='restricted'&&a.doorAccess.roles.includes('Captain')));let door;
-  for(const z of meta.levels){const level=await fetch(new URL(`tramstation/${z}.json`,root)).then(r=>r.json()),index=level.grid.indexOf(doorId);if(index>=0){door={x:index%meta.width+1,y:meta.height-Math.floor(index/meta.width),z};break;}}
-  const stairs=meta.infrastructure.transitions.find(t=>t.z===2&&t.targets.length);return {door,stairs,height:meta.height,networks:meta.infrastructure.powerNetworks};
- });
+ const manifest=await fetch(new URL('data/manifest.json',url)).then(r=>r.json()),root=new URL(`data/${manifest.dataPath||''}`,url),meta=decodeMap(await fetch(new URL('tramstation/map.json',root)).then(r=>r.json()));
+ const doorId=meta.definitions.findIndex(def=>def.atoms.some(a=>a.doorAccess?.kind==='restricted'&&a.doorAccess.roles.includes('Captain')));let door;
+ for(const z of meta.levels){const level=decodeLevel(await fetch(new URL(`tramstation/${z}.json`,root)).then(r=>r.json())),index=level.grid.indexOf(doorId);if(index>=0){door={x:index%meta.width+1,y:meta.height-Math.floor(index/meta.width),z};break;}}
+ const fixture={door,stairs:meta.infrastructure.transitions.find(t=>t.z===2&&t.targets.length),height:meta.height,networks:meta.infrastructure.powerNetworks};
+
  assert.ok(fixture.networks>1);assert.ok(fixture.door);assert.ok(fixture.stairs);
  const target=new URL(url),d=fixture.door;target.hash=`m=tramstation&z=${d.z}&x=${(d.x-.5)*32}&y=${(fixture.height-d.y+.5)*32}&s=1&t=${d.x},${d.y},${d.z}`;
  await page.goto(target.href);await page.locator('#loading').waitFor({state:'hidden',timeout:120000});await page.locator('#inspector').waitFor({state:'visible'});assert.equal(await page.locator('#detailed-view').isChecked(),false);assert.equal(await page.locator('#inspector details,#inspector a').count(),0);assert.match(await page.locator('#inspector').textContent(),/Who can open.*Captain.*Who can NOT open/s);const doorSection=page.locator('#inspector > section').first();assert.match(await doorSection.locator('.friendly-description').nth(0).textContent(),/Captain/);assert.doesNotMatch(await doorSection.locator('.friendly-description').nth(1).textContent(),/Captain/);

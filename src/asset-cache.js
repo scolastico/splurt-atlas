@@ -32,6 +32,9 @@ export class AssetCache {
   get enabled(){return this.mode==='all'||this.mode==='current';}
   setManifest(manifest){this.version=manifest.buildId||manifest.commit;this.mapVersions=new Map(manifest.maps.map(map=>[map.id,map.assetVersion||this.version]));}
   versionFor(path){return this.mapVersions?.get(path.split('/')[0])||this.version;}
+  // Map files never change under the same version, so hosts may serve them as
+  // immutable; the query string keeps browser and edge caches version-exact.
+  versioned(url,path){const target=new URL(url);if(path.includes('/'))target.searchParams.set('v',this.versionFor(path));return target;}
   canStore(path){return this.mode==='all'||(this.mode==='current'&&this.currentMap&&path.startsWith(this.currentMap+'/'));}
   canStoreKey(key){const prefix=this.scope+':';if(!this.enabled||!key.startsWith(prefix))return false;if(key===`${prefix}catalog`)return true;const suffix=key.slice(prefix.length),split=suffix.indexOf(':'),file=suffix.slice(split+1);return split>0&&suffix.slice(0,split)===this.versionFor(file)&&this.canStore(file);}
   stopWarm(){this.warmRun++;this.warmAbort?.abort();}
@@ -122,7 +125,7 @@ export class AssetCache {
         let blob=record?.blob;
         if(!blob){
           report(`Downloading ${map.name} ZIP (${index+1}/${maps.length})...`,map,'download');
-          const response=await fetch(new URL(map.archive.path,base),{signal,priority:'low'});if(!response.ok)throw new Error(`${map.name}: HTTP ${response.status}`);
+          const response=await fetch(this.versioned(new URL(map.archive.path,base),map.id+'/'),{signal,priority:'low'});if(!response.ok)throw new Error(`${map.name}: HTTP ${response.status}`);
           const chunks=[];let received=0,last=0;const reader=response.body?.getReader();
           if(reader){while(true){const {value,done}=await reader.read();if(done)break;chunks.push(value);received+=value.byteLength;const now=performance.now();if(now-last>200&&!stopped()){last=now;report(`Downloading ${map.name} ZIP (${index+1}/${maps.length}): ${Math.round(received/1048576)} / ${Math.round(map.archive.bytes/1048576)} MB`,map,'download',received/map.archive.bytes);}}blob=new Blob(chunks,{type:'application/zip'});}else blob=await response.blob();
           if(stopped())return;if(blob.size!==map.archive.bytes)throw new Error(`${map.name}: incomplete ZIP download`);
@@ -145,27 +148,15 @@ export class AssetCache {
     }catch(error){if(!stopped())this.onStatus(`Offline saving paused: ${error.message}. Reopening will retry.`);}
     finally{if(this.warmAbort===controller)this.warmAbort=null;this.onActivity(false);}
   }
+  // Offline copies always come from one ZIP per map. Fetching thousands of
+  // separate files would be dominated by request overhead, so maps without a
+  // packaged download are simply not saved.
   async warm(manifest,base){
     if(!this.enabled){await this.prune();return;}
     if(!await this.database){this.onStatus('Local storage is unavailable; offline saving is paused.');return;}
-    if(manifest.maps.every(map=>map.archive)){
-      if(this.archiveWarming){await this.archiveWarming;if(!this.enabled)return;}
-      return this.warmArchives(manifest,base);
-    }
-    const run=++this.warmRun;let complete=0,total=0,bytes=0;
-    await this.prune();if(run!==this.warmRun)return;
-    const maps=this.mode==='all'?manifest.maps:manifest.maps.filter(map=>map.id===this.currentMap);
-    if(!maps.length){this.onStatus('Choose a map to save it on this device.');return;}
-    try{
-      const lists=await Promise.all(maps.map(async map=>{
-        if(!map.assets)return[];
-        const blob=await this.get(new URL(map.assets,base),map.assets);return JSON.parse(await blob.text()).map(asset=>({...asset,path:`${map.id}/${asset.path}`}));
-      }));
-      const assets=lists.flat();total=assets.length;let cursor=0,last=0;
-      const totalBytes=assets.reduce((n,item)=>n+item.bytes,0);
-      const worker=async()=>{while(this.enabled&&!this.storageFull&&run===this.warmRun&&cursor<assets.length){if(this.foregroundBusy){await new Promise(resolve=>setTimeout(resolve,100));continue;}const item=assets[cursor++],key=`${this.scope}:${this.versionFor(item.path)}:${item.path}`;if(!(await this.keysReady)?.has(key)&&!this.buffer.has(key))await this.get(new URL(item.path,base),item.path,'low');complete++;bytes+=item.bytes;const now=performance.now();if(this.enabled&&run===this.warmRun&&!this.storageFull&&(now-last>200||complete===total)){last=now;this.onStatus(`Saving ${this.mode==='all'?'all maps':'current map'}: ${Math.round(complete/total*100)}% · ${Math.round(bytes/1048576)} / ${Math.round(totalBytes/1048576)} MB`);}}};
-      await Promise.all(Array.from({length:4},worker));
-      await this.flushWrites();if(this.enabled&&!this.storageFull&&run===this.warmRun&&complete===total)this.onStatus(`${this.mode==='all'?`All ${maps.length} maps`:'Current map'} saved for reopening (${Math.round(bytes/1048576)} MB).`);
-    }catch(error){if(run===this.warmRun)this.onStatus(`Offline saving paused: ${error.message}. Reopening will retry.`);}
+    const packaged={...manifest,maps:manifest.maps.filter(map=>map.archive)};
+    if(!packaged.maps.length){await this.prune();this.onStatus('This export has no packaged map downloads; offline saving is unavailable.');return;}
+    if(this.archiveWarming){await this.archiveWarming;if(!this.enabled)return;}
+    return this.warmArchives(packaged,base);
   }
 }

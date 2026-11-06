@@ -1,6 +1,7 @@
+import {decodeMap,decodeLevel} from './lib/map-format.mjs';
 import {chromium} from '@playwright/test';import assert from 'node:assert/strict';import {mkdirSync,writeFileSync} from 'node:fs';
-const url=process.env.ATLAS_URL||'http://127.0.0.1:5173/',manifest=await fetch(new URL('data/manifest.json',url)).then(response=>response.json()),base=new URL('data/'+(manifest.dataPath||''),url),meta=await fetch(new URL('biodome/map.json',base)).then(response=>response.json());
-const levels=await Promise.all(meta.levels.map(z=>fetch(new URL(`biodome/${z}.json`,base)).then(response=>response.json())));
+const url=process.env.ATLAS_URL||'http://127.0.0.1:5173/',manifest=await fetch(new URL('data/manifest.json',url)).then(response=>response.json()),base=new URL('data/'+(manifest.dataPath||''),url),meta=decodeMap(await fetch(new URL('biodome/map.json',base)).then(response=>response.json()));
+const levels=await Promise.all(meta.levels.map(z=>fetch(new URL(`biodome/${z}.json`,base)).then(response=>response.json()).then(decodeLevel)));
 let helperTile,controlTile;
 for(const level of levels)for(let index=0;index<level.grid.length;index++){
  const definition=meta.definitions[level.grid[index]];if(!definition)continue;const tile={x:index%meta.width+1,y:meta.height-Math.floor(index/meta.width),z:level.z};

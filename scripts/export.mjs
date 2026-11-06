@@ -8,10 +8,11 @@ import { loadTypes, unquote, pretty, classify, aperture } from './lib/dm.mjs';
 import { createSpriteReader } from './lib/dmi.mjs';
 import { expandStructures, smoothAtoms } from './lib/appearance.mjs';
 import { promote } from './promote.mjs';
-import { writeMipmaps } from './lib/image-pyramid.mjs';
+import { writeStrip, buildPyramid } from './lib/image-pyramid.mjs';
+import { CHANNELS, OVERVIEW_TERRAIN, channelMask, stripName, encodeMap, encodeLevel, encodeSearch, levelBounds, SCHEMA } from './lib/map-format.mjs';
 import { buildInfrastructure } from './lib/infrastructure.mjs';
 import { createDoorResolver } from './lib/door-access.mjs';
-import { bakeRuntimeTerrain, runtimeReplacement } from './lib/runtime-terrain.mjs';
+import { createNaturalTerrain, runtimeReplacement } from './lib/runtime-terrain.mjs';
 import { digest, converterDigest, loadBaseline, completeMap, reuseMap, canQuickReuse, mapFingerprint, legacyMatches } from './lib/incremental.mjs';
 import { bakedChannel } from './lib/utility-visibility.mjs';
 import { doorControlKeys,collectDoorControls } from './lib/door-controls.mjs';
@@ -64,7 +65,7 @@ db.resolve = (type, ...rest) => { if(type)usedTypes.add(type);return resolveType
 sprites.hasState = (icon,state) => { if(icon)usedIcons.add(icon);return hasState(icon,state); };
 db.hasIconState = sprites.hasState;
 console.log(`${db.types.size} types from ${db.fileCount} DM files`);
-const manifest = { schema: 2, buildId:randomUUID(), converter, ...provenance, tilePixels: config.tilePixels, chunkTiles: config.chunkTiles, maps: [] };
+const manifest = { schema: SCHEMA, buildId:randomUUID(), converter, ...provenance, tilePixels: config.tilePixels, chunkTiles: config.chunkTiles, maps: [] };
 function checkpoint(){if(process.env.ATLAS_CHECKPOINT==='1'){const temporary=path.join(output,'manifest.checkpoint.json');writeFileSync(temporary,JSON.stringify({...manifest,complete:false},null,2));renameSync(temporary,path.join(output,'manifest.json'));}}
 const rebuilt = [], reused = [], iconHashes = new Map();
 const S = config.tilePixels, C = config.chunkTiles, P = S * C;
@@ -183,7 +184,7 @@ for (const id of selected) {
     locations.get(itemId).push(cell.x, cell.y, cell.z);
   }
   for (const [itemId, points] of locations) items.push({ ...itemDefs[itemId], points });
-  writeFileSync(`${dir}/search.json`, JSON.stringify(items));
+  writeFileSync(`${dir}/search.json`, JSON.stringify(encodeSearch(items)));
   const roomCells = new Map();
   for (const cell of cells) {
     const area = defs[keyIds.get(cell.key)].area, key = `${area}:${cell.z}`;
@@ -215,7 +216,8 @@ for (const id of selected) {
     manifest.maps.push({...reuseMap(baseline,previous,dir),fingerprint,inputs});reused.push(id);console.log(`${id}: reused (rendering inputs unchanged)`);checkpoint();continue;
   }
   rebuilt.push(id);
-  writeFileSync(`${dir}/map.json`, JSON.stringify(mapMeta));
+  writeFileSync(`${dir}/map.json`, JSON.stringify(encodeMap(mapMeta)));
+  const natural=createNaturalTerrain(mapMeta,db,sprites,S,C);
   for (const z of levels) {
     console.log(`${meta.map_name} · Z${z}: rendering ${width} × ${height}`);
     const levelCells = cells.filter(c => c.z === z), grid = new Int32Array(width * height).fill(-1), holes = Buffer.alloc(width * height * 4), chunks = new Map();
@@ -235,46 +237,66 @@ for (const id of selected) {
     }
     const levelDir = `${dir}/${z}`; mkdirSync(levelDir, { recursive: true });
     await sharp(holes, { raw: { width, height, channels: 4 } }).png().toFile(`${levelDir}/aperture.png`);
-    const chunkIndex = { base: [], foreground:[], pipes: [], power: [], fluid: [], disposal: [], transit: [], 'disposal-surface':[], 'pipes-surface':[], 'power-surface':[], 'fluid-surface':[] };
-    const overviews = [];
-    for (const [channel] of Object.entries(chunkIndex)) {
-      let renderedChunks=0;
-      for (const [ck, entries] of chunks) {
-        const fraction=(Object.keys(chunkIndex).indexOf(channel)+renderedChunks++/chunks.size)/Object.keys(chunkIndex).length;
-        progress.update(`${meta.map_name}: deck ${z}, ${channel}, chunk ${renderedChunks}/${chunks.size}`,100*(mapIndex+(levels.indexOf(z)+fraction)/levels.length)/selected.length);
-        const composite = [];
-        for (const { cell, px, py, cx, cy } of entries) {
-          const input = await tileImage(cell.appearance, channel);
-          if (input) composite.push({ input, left: px - cx * P + S, top: py - cy * P + S });
+    const terrain = natural?.level(z, grid), chunkIndex = [], overviewParts = new Map();
+    let rendered = 0;
+    for (const [ck, entries] of chunks) {
+      const [cx, cy] = ck.split(',').map(Number);
+      progress.update(`${meta.map_name}: deck ${z}, chunk ${++rendered}/${chunks.size}`, 100 * (mapIndex + (levels.indexOf(z) + rendered / chunks.size) / levels.length) / selected.length);
+      // Every channel of a chunk shares one strip, so a view needs one request
+      // per chunk instead of one per channel. Slots follow CHANNELS order.
+      const slots = [];
+      for (const channel of CHANNELS) {
+        let raw = null;
+        if (channel === 'natural') { if (terrain?.chunks.has(ck)) raw = await terrain.render(cx, cy); }
+        else {
+          const composite = [];
+          for (const { cell, px, py } of entries) {
+            const input = await tileImage(cell.appearance, channel);
+            if (input) composite.push({ input, left: px - cx * P + S, top: py - cy * P + S });
+          }
+          if (composite.length) {
+            // Two-tile gutter provides a fixed nonnegative composite origin.
+            const full = await sharp({ create: { width: P + S * 4, height: P + S * 4, channels: 4, background: '#00000000' } }).composite(composite).raw().toBuffer();
+            raw = await sharp(full, { raw: { width: P + S * 4, height: P + S * 4, channels: 4 } }).extract({ left: S * 2, top: S * 2, width: P, height: P }).raw().toBuffer();
+          }
         }
-        if (!composite.length) continue;
-        // Two-tile gutter provides a fixed nonnegative composite origin.
-        const [cx, cy] = ck.split(',').map(Number);
-        const file = `${channel}-${cx}-${cy}.webp`;
-        await sharp({ create: { width: P + S * 4, height: P + S * 4, channels: 4, background: '#00000000' } })
-          .composite(composite).png().toBuffer()
-          .then(buffer => sharp(buffer).extract({ left: S * 2, top: S * 2, width: P, height: P }).webp({ lossless: true }).toFile(`${levelDir}/${file}`));
-        await writeMipmaps(`${levelDir}/${file}`, P);
-        chunkIndex[channel].push([cx, cy]);
+        if (raw) slots.push({ channel, raw });
       }
-      if (chunkIndex[channel].length) {
-        const overviewParts = [];
-        for (const [cx, cy] of chunkIndex[channel]) overviewParts.push({ input: await sharp(`${levelDir}/${channel}-${cx}-${cy}.webp`).resize(C * 4, C * 4, { kernel: 'nearest' }).png().toBuffer(), left: cx * C * 4, top: cy * C * 4 });
-        const overviewSize = Math.ceil(Math.max(width, height) / C) * C * 4;
-        await sharp({ create: { width: overviewSize, height: overviewSize, channels: 4, background: '#00000000' } }).composite(overviewParts).png().toBuffer()
-          .then(buffer => sharp(buffer).extract({ left: 0, top: 0, width: width * 4, height: height * 4 }).webp({ lossless: true }).toFile(`${levelDir}/${channel}-overview.webp`));
-        overviews.push(channel);
+      if (!slots.length) continue;
+      await writeStrip(`${levelDir}/${stripName(cx, cy)}`, Buffer.concat(slots.map(slot => slot.raw)), P, P * slots.length);
+      for (const { channel, raw } of slots) {
+        if (!overviewParts.has(channel)) overviewParts.set(channel, []);
+        overviewParts.get(channel).push({ input: await sharp(raw, { raw: { width: P, height: P, channels: 4 } }).resize(C * 4, C * 4, { kernel: 'nearest' }).png().toBuffer(), left: cx * C * 4, top: cy * C * 4 });
       }
+      chunkIndex.push([cx, cy, channelMask(slots.map(slot => slot.channel))]);
     }
-    writeFileSync(`${dir}/${z}.json`, JSON.stringify({ z, grid: Array.from(grid), chunks: chunkIndex, overviews, mips: [1, 2] }));
-    console.log(`  ${Object.values(chunkIndex).reduce((n, c) => n + c.length, 0)} image chunks`);
+    progress.update(`${meta.map_name}: deck ${z}, zoom levels`, 100 * (mapIndex + (levels.indexOf(z) + 1) / levels.length) / selected.length);
+    const pyramid = await buildPyramid(levelDir, chunkIndex, P);
+    // The natural overview is the base overview with generated terrain on top.
+    if (overviewParts.has('natural')) overviewParts.set('natural', [...(overviewParts.get('base') || []), ...overviewParts.get('natural')]);
+    const overviewSize = Math.ceil(Math.max(width, height) / C) * C * 4, overviews = new Map();
+    for (const channel of CHANNELS.filter(channel => overviewParts.has(channel))) {
+      const full = await sharp({ create: { width: overviewSize, height: overviewSize, channels: 4, background: '#00000000' } }).composite(overviewParts.get(channel)).raw().toBuffer();
+      overviews.set(channel, await sharp(full, { raw: { width: overviewSize, height: overviewSize, channels: 4 } }).extract({ left: 0, top: 0, width: width * 4, height: height * 4 }).raw().toBuffer());
+    }
+    // Terrain and utility overviews are separate strips: lower decks only ever
+    // decode the small terrain strip, utilities load for the viewed deck.
+    const masks = {};
+    for (const [file, channels] of [['overview', OVERVIEW_TERRAIN], ['overview-utilities', CHANNELS.filter(channel => !OVERVIEW_TERRAIN.includes(channel))]]) {
+      const present = channels.filter(channel => overviews.has(channel));
+      masks[file] = channelMask(present);
+      if (present.length) await sharp(Buffer.concat(present.map(channel => overviews.get(channel))), { raw: { width: width * 4, height: height * 4 * present.length, channels: 4 } }).webp({ lossless: true }).toFile(`${levelDir}/${file}.webp`);
+    }
+    if (z === levels.at(-1)) for (const [channel, file] of [['base', 'preview.webp'], ['natural', 'preview-natural.webp']]) {
+      if (overviews.has(channel)) await sharp(overviews.get(channel), { raw: { width: width * 4, height: height * 4, channels: 4 } }).resize(Math.min(width * 4, 512), null, { kernel: 'nearest' }).webp({ lossless: true }).toFile(`${dir}/${file}`);
+    }
+    writeFileSync(`${dir}/${z}.json`, JSON.stringify(encodeLevel({ z, grid, pyramid, overview: masks.overview, overviewUtilities: masks['overview-utilities'], bounds: levelBounds(grid, width, height, defs) })));
+    console.log(`  ${pyramid.map(level => level.length).join(' + ')} strips${terrain?.chunks.size ? `, ${terrain.chunks.size} chunks with generated terrain` : ''}`);
   }
-  await bakeRuntimeTerrain(dir,mapMeta,db,sprites,S,C);
-  writeFileSync(`${dir}/report.json`, JSON.stringify({ unresolvedSpawners: mapMeta.unresolvedSpawners, sprites: sprites.report, note: 'Static declarations only; no DM runtime. See README for fidelity limits.' }, null, 2));
   const assets=[];function listAssets(folder,prefix=''){for(const entry of readdirSync(folder,{withFileTypes:true})){const name=prefix+entry.name;if(entry.isDirectory())listAssets(`${folder}/${entry.name}`,name+'/');else assets.push({path:name,bytes:readFileSync(`${folder}/${entry.name}`).length});}}
   listAssets(dir);writeFileSync(`${dir}/assets.json`,JSON.stringify(assets));
-  manifest.maps.push({ id, name: meta.map_name, width, height, levels, items: items.length,fingerprint,inputs,assetVersion:fingerprint,assets:`${id}/assets.json`,bytes:assets.reduce((n,a)=>n+a.bytes,0),preview:existsSync(`${dir}/${levels.at(-1)}/base-overview.webp`)?`${id}/${levels.at(-1)}/base-overview.webp`:null });
-  if(existsSync(`${dir}/${levels.at(-1)}/natural-overview.webp`))manifest.maps.at(-1).naturalPreview=`${id}/${levels.at(-1)}/natural-overview.webp`;
+  manifest.maps.push({ id, name: meta.map_name, width, height, levels, items: items.length,fingerprint,inputs,assetVersion:fingerprint,assets:`${id}/assets.json`,bytes:assets.reduce((n,a)=>n+a.bytes,0),preview:existsSync(`${dir}/preview.webp`)?`${id}/preview.webp`:null });
+  if(existsSync(`${dir}/preview-natural.webp`))manifest.maps.at(-1).naturalPreview=`${id}/preview-natural.webp`;
   checkpoint();
 }
 copyFileSync(`${root}/LICENSE`, `${output}/UPSTREAM-LICENSE.txt`);

@@ -1,4 +1,0 @@
-import {readFileSync,writeFileSync} from 'node:fs';import {loadTypes} from './lib/dm.mjs';import {createSpriteReader} from './lib/dmi.mjs';import {bakeRuntimeTerrain} from './lib/runtime-terrain.mjs';
-const catalog=JSON.parse(readFileSync('public/data/manifest.json')),root=`public/data/${catalog.dataPath||''}`,db=loadTypes('.source/S.P.L.U.R.T-tg'),reader=createSpriteReader('.source/S.P.L.U.R.T-tg');db.hasIconState=reader.hasState;
-for(const map of catalog.maps){const dir=`${root}/${map.id}`,meta=JSON.parse(readFileSync(`${dir}/map.json`));if(await bakeRuntimeTerrain(dir,meta,db,reader,catalog.tilePixels,catalog.chunkTiles))map.naturalPreview=map.levels.map(z=>`${map.id}/${z}/natural-overview.webp`);}
-const inventory=JSON.parse(readFileSync(`${root}/asset-sources.json`));inventory.icons=[...new Set([...inventory.icons,...reader.icons])].sort();writeFileSync(`${root}/asset-sources.json`,JSON.stringify(inventory,null,2));

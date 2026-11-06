@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, existsSync, statSync, mkdirSync, linkSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
+import { encodeMap, encodeSearch } from './map-format.mjs';
 
 export const digest = value => createHash('sha256').update(value).digest('hex');
 export function converterDigest(root = '.') {
@@ -52,7 +53,8 @@ export function mapFingerprint({ converter, config, metadata, items, cells, type
 export function legacyMatches(baseline, map, commit, metadata, items) {
   if (!baseline || !map || map.fingerprint || baseline.manifest.commit !== commit) return false;
   try {
-    return JSON.stringify(JSON.parse(readFileSync(path.join(baseline.root, map.id, 'map.json')))) === JSON.stringify(metadata) &&
-      JSON.stringify(JSON.parse(readFileSync(path.join(baseline.root, map.id, 'search.json')))) === JSON.stringify(items);
+    // Encoding is deterministic, so identical metadata produces identical files.
+    return readFileSync(path.join(baseline.root, map.id, 'map.json'), 'utf8') === JSON.stringify(encodeMap(metadata)) &&
+      readFileSync(path.join(baseline.root, map.id, 'search.json'), 'utf8') === JSON.stringify(encodeSearch(items));
   } catch { return false; }
 }

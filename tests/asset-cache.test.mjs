@@ -11,24 +11,35 @@ test('catalog fallback restores the last known manifest when the network is unav
  preferences.clear();preferences.set('atlas-storage-mode','all');const manifest={maps:[{id:'one'}]};globalThis.fetch=async()=>new Response(JSON.stringify(manifest));const cache=new AssetCache('test-catalog');await cache.catalog('https://example.test/manifest.json');
  globalThis.fetch=async()=>{throw new Error('offline');};assert.deepEqual(await cache.catalog('https://example.test/manifest.json'),manifest);
 });
-test('offline warming includes sprites and metadata of maps that were never selected',async()=>{
- preferences.clear();preferences.set('atlas-storage-mode','all');let requests=0;globalThis.fetch=async url=>{requests++;return new Response(String(url).endsWith('assets.json')?JSON.stringify([{path:'map.json',bytes:10},{path:'1/base.webp',bytes:20}]):'cached-resource');};
- let status='';const cache=new AssetCache('test-all-maps',value=>status=value);cache.version='revision';const manifest={maps:[{id:'first',assets:'first/assets.json'},{id:'unselected',assets:'unselected/assets.json'}]};
- await cache.warm(manifest,new URL('https://example.test/data/'));assert.equal(requests,6);assert.ok(status.startsWith('All 2 maps saved'));
- const blob=await cache.read('test-all-maps:revision:unselected/1/base.webp');assert.equal(await blob.text(),'cached-resource');await cache.warm(manifest,new URL('https://example.test/data/'));assert.equal(requests,6);
+async function zipFixture(){
+ const zip=new JSZip();zip.file('assets.json',JSON.stringify([{path:'map.json',bytes:2},{path:'1/base.webp',bytes:6}]));zip.file('map.json','{}');zip.file('1/base.webp','sprite');
+ const blob=new Blob([await zip.generateAsync({type:'uint8array'})],{type:'application/zip'});
+ const maps=['first','second'].map(id=>({id,name:id,assets:`${id}/assets.json`,assetVersion:'map-1',archive:{path:`${id}.zip`,bytes:blob.size}}));
+ return{blob,manifest:{buildId:'build-1',maps},base:new URL('https://example.test/data/')};
+}
+test('offline warming saves whole ZIPs for maps that were never selected and never fetches single files',async()=>{
+ preferences.clear();preferences.set('atlas-storage-mode','all');const {blob,manifest,base}=await zipFixture(),requests=[];globalThis.fetch=async url=>{requests.push(String(url));return new Response(blob);};
+ let status='';const cache=new AssetCache('test-all-maps',value=>status=value);cache.setManifest(manifest);
+ await cache.warm(manifest,base);assert.deepEqual(requests.map(url=>new URL(url).pathname),['/data/first.zip','/data/second.zip']);assert.ok(requests.every(url=>new URL(url).searchParams.get('v')==='map-1'));assert.ok(status.startsWith('All 2 maps saved'));
+ const stored=await cache.read('test-all-maps:map-1:second/1/base.webp');assert.equal(await stored.text(),'sprite');await cache.warm(manifest,base);assert.equal(requests.length,2);
+ const unpackaged={buildId:'build-1',maps:[{id:'loose',assets:'loose/assets.json'}]};cache.setManifest(unpackaged);await cache.warm(unpackaged,base);assert.equal(requests.length,2,'Maps without a ZIP are never downloaded file by file');assert.match(status,/no packaged map downloads/);
+});
+test('versioned URLs stamp map files but leave catalog files untouched',()=>{
+ const cache=new AssetCache('test-versions');cache.setManifest({buildId:'build-9',maps:[{id:'one',assetVersion:'one-3'}]});
+ assert.equal(cache.versioned(new URL('https://example.test/data/one/1/c-0-0.webp'),'one/1/c-0-0.webp').href,'https://example.test/data/one/1/c-0-0.webp?v=one-3');
+ assert.equal(cache.versioned(new URL('https://example.test/data/manifest.json'),'manifest.json').href,'https://example.test/data/manifest.json');
 });
 
 test('first visit waits for a local choice and current-map mode replaces the old saved map',async()=>{
- preferences.clear();const requests=[];globalThis.fetch=async url=>{requests.push(String(url));return new Response(String(url).endsWith('assets.json')?JSON.stringify([{path:'map.json',bytes:10},{path:'1/base.webp',bytes:20}]):'sprite');};
- const cache=new AssetCache('test-current-only');cache.version='revision';assert.equal(cache.mode,null);assert.equal(cache.enabled,false);
- const manifest={maps:[{id:'first',assets:'first/assets.json'},{id:'second',assets:'second/assets.json'}]},base=new URL('https://example.test/data/');
+ preferences.clear();const {blob,manifest,base}=await zipFixture(),requests=[];globalThis.fetch=async url=>{requests.push(String(url));return new Response(blob);};
+ const cache=new AssetCache('test-current-only');cache.setManifest(manifest);assert.equal(cache.mode,null);assert.equal(cache.enabled,false);
  await cache.warm(manifest,base);assert.deepEqual(requests,[]);
  cache.setMode('current');cache.setCurrentMap('first');await cache.warm(manifest,base);
- assert.equal(requests.length,3);assert.ok(requests.every(url=>url.includes('/first/')));
- const firstKey='test-current-only:revision:first/1/base.webp';assert.ok(await cache.read(firstKey));
+ assert.equal(requests.length,1);assert.ok(requests.every(url=>url.includes('/first.zip')));
+ const firstKey='test-current-only:map-1:first/1/base.webp';assert.ok(await cache.read(firstKey));
  const reopened=new AssetCache('test-current-only');assert.equal(reopened.mode,'current');assert.equal(reopened.currentMap,'first');
- cache.setCurrentMap('second');await cache.warm(manifest,base);assert.equal(await cache.read(firstKey),null);assert.ok(await cache.read('test-current-only:revision:second/1/base.webp'));
- cache.setMode('none');await cache.warm(manifest,base);assert.equal(await cache.read('test-current-only:revision:second/1/base.webp'),null);
+ cache.setCurrentMap('second');await cache.warm(manifest,base);assert.equal(await cache.read(firstKey),null);assert.ok(await cache.read('test-current-only:map-1:second/1/base.webp'));
+ cache.setMode('none');await cache.warm(manifest,base);assert.equal(await cache.read('test-current-only:map-1:second/1/base.webp'),null);
 });
 
 test('switching all-map mode to current-only prunes other maps and old export revisions',async()=>{
@@ -60,17 +71,11 @@ test('an incremental release retains cached images for maps that were reused',as
  assert.equal(await cache.read('test-map-versions:one-1:one/base.webp'),null);
 });
 
-async function zipFixture(){
- const zip=new JSZip();zip.file('assets.json',JSON.stringify([{path:'map.json',bytes:2},{path:'1/base.webp',bytes:6}]));zip.file('map.json','{}');zip.file('1/base.webp','sprite');
- const blob=new Blob([await zip.generateAsync({type:'uint8array'})],{type:'application/zip'});
- const maps=['first','second'].map(id=>({id,name:id,assets:`${id}/assets.json`,assetVersion:'map-1',archive:{path:`${id}.zip`,bytes:blob.size}}));
- return{blob,manifest:{buildId:'build-1',maps},base:new URL('https://example.test/data/')};
-}
 test('ZIP warming downloads once per map, removes completed ZIPs and reopens without asset requests',async()=>{
  preferences.clear();preferences.set('atlas-storage-mode','all');const {blob,manifest,base}=await zipFixture(),requests=[];
  globalThis.fetch=async url=>{requests.push(String(url));return new Response(blob);};
  const cache=new AssetCache('test-zip-all');cache.setManifest(manifest);await cache.warm(manifest,base);
- assert.deepEqual(requests,['https://example.test/data/first.zip','https://example.test/data/second.zip']);
+ assert.deepEqual(requests.map(url=>new URL(url).pathname),['/data/first.zip','/data/second.zip']);
  assert.equal(await cache.archiveRecord('test-zip-all:map-1:first/archive.zip'),undefined);
  const reopened=new AssetCache('test-zip-all');reopened.setManifest(manifest);await reopened.warm(manifest,base);
  assert.equal(requests.length,2);assert.equal(await(await reopened.get(new URL('second/1/base.webp',base),'second/1/base.webp')).text(),'sprite');assert.equal(requests.length,2);
@@ -96,7 +101,7 @@ test('the current map is downloaded and fully extracted before another map ZIP s
  preferences.clear();preferences.set('atlas-storage-mode','all');const {blob,manifest,base}=await zipFixture(),events=[],activity=[];
  const cache=new AssetCache('test-zip-priority',()=>{},(active,info)=>activity.push({active,ready:!!info?.currentReady}));cache.setManifest(manifest);cache.setCurrentMap('second');
  globalThis.fetch=async url=>{events.push(String(url));if(String(url).endsWith('first.zip')){assert.ok(await cache.read('test-zip-priority:map-1:second/1/base.webp'));assert.equal(await cache.archiveRecord('test-zip-priority:map-1:second/archive.zip'),undefined);}return new Response(blob);};
- await cache.warm(manifest,base);assert.deepEqual(events,['https://example.test/data/second.zip','https://example.test/data/first.zip']);assert.equal(activity[0].active,true);assert.equal(activity.at(-1).active,false);assert.ok(activity.slice(0,-1).every(state=>state.active));assert.ok(activity.some(state=>state.active&&state.ready),'Current-ready status keeps the indicator visible while other maps are prepared');
+ await cache.warm(manifest,base);assert.deepEqual(events.map(url=>new URL(url).pathname),['/data/second.zip','/data/first.zip']);assert.equal(activity[0].active,true);assert.equal(activity.at(-1).active,false);assert.ok(activity.slice(0,-1).every(state=>state.active));assert.ok(activity.some(state=>state.active&&state.ready),'Current-ready status keeps the indicator visible while other maps are prepared');
 });
 test('cache status reports each activity, step progress and monotonic overall remaining work',async()=>{
  preferences.clear();preferences.set('atlas-storage-mode','all');const {blob,manifest,base}=await zipFixture(),progress=[];

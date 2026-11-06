@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { loadTypes } from './lib/dm.mjs';
 import { objectOffsets } from './lib/object-offsets.mjs';
+import { decodeMap } from './lib/map-format.mjs';
 
 const db = loadTypes('.source/S.P.L.U.R.T-tg');
 const manifest = JSON.parse(readFileSync('public/data/manifest.json'));
@@ -9,7 +10,7 @@ const root = path.resolve('public/data', manifest.dataPath || '.');
 const mapped = new Map(), unresolved = [], declarations = [], runtime = [];
 let mappedAtoms = 0;
 for (const map of manifest.maps) {
-  const meta = JSON.parse(readFileSync(path.join(root, map.id, 'map.json')));
+  const meta = decodeMap(JSON.parse(readFileSync(path.join(root, map.id, 'map.json'))));
   for (const definition of meta.definitions) for (const atom of definition.atoms) {
     if (!/^\/(obj|mob)\//.test(atom.path)) continue;
     mappedAtoms++;

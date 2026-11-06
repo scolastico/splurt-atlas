@@ -1,6 +1,7 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { decodeMap, decodeLevel } from './lib/map-format.mjs';
 
 const url = process.env.ATLAS_URL || 'http://127.0.0.1:5173/';
 mkdirSync('.cache/qa', { recursive: true });
@@ -110,9 +111,9 @@ try {
   await page.waitForFunction(() => document.querySelector('#map-title').textContent === 'Void Raptor');
   await page.locator('#fit').click(); await page.locator('#sidebar-toggle').click(); await page.waitForTimeout(1500);
   await page.waitForLoadState('networkidle');
-  const settledRequests = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => e.name.endsWith('.webp')).length);
+  const settledRequests = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => new URL(e.name).pathname.endsWith('.webp')).length);
   await page.waitForTimeout(1500);
-  const afterIdleRequests = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => e.name.endsWith('.webp')).length);
+  const afterIdleRequests = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => new URL(e.name).pathname.endsWith('.webp')).length);
   assert.equal(afterIdleRequests, settledRequests, 'Image cache must settle without repeatedly loading the same chunks');
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: '.cache/qa/mobile.png' });
@@ -137,26 +138,26 @@ try {
   await page.waitForTimeout(300);
   assert.equal(await page.locator('#space').evaluate(el => el.toDataURL()), pausedBackground, 'Motion toggle should pause the galaxy');
   await page.locator('#motion').check();
-  const beforeStressIdle = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => e.name.endsWith('.webp')).length);
+  const beforeStressIdle = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => new URL(e.name).pathname.endsWith('.webp')).length);
   await page.waitForTimeout(1500);
-  assert.equal(await page.evaluate(() => performance.getEntriesByType('resource').filter(e => e.name.endsWith('.webp')).length), beforeStressIdle, 'Four-deck detail with every network must settle');
+  assert.equal(await page.evaluate(() => performance.getEntriesByType('resource').filter(e => new URL(e.name).pathname.endsWith('.webp')).length), beforeStressIdle, 'Four-deck detail with every network must settle');
   await page.locator('#map').focus();
   for (let i = 0; i < 16; i++) { await page.keyboard.press(i < 8 ? 'ArrowRight' : 'ArrowLeft'); await page.waitForTimeout(30); }
   for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowRight');
   await page.waitForLoadState('networkidle');
   assert.equal(await page.locator('#map').getAttribute('data-detail'),'1','Detail must stay at the same zoom mip near map borders');
   await page.screenshot({ path: '.cache/qa/northstar-networks.png' });
-  const entries = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => e.name.endsWith('.webp')).length);
+  const entries = await page.evaluate(() => performance.getEntriesByType('resource').filter(e => new URL(e.name).pathname.endsWith('.webp')).length);
   const frameStats = await page.evaluate(() => {
     const frames = window.__atlasFrames.slice().sort((a, b) => a - b);
     return { callbacks: frames.length, medianMs: frames[Math.floor(frames.length * .5)], p95Ms: frames[Math.floor(frames.length * .95)] };
   });
   // Compare actual exported geometry: lower content must change inside an
   // opening while a nearby opaque upper tile remains pixel-identical.
-  const geometry = await page.evaluate(async () => {
-    const manifest = await fetch(new URL('./data/manifest.json',document.baseURI)).then(r=>r.json());
-    const read = name => fetch(new URL(`./data/${manifest.dataPath || ''}tramstation/${name}`, document.baseURI)).then(r => r.json());
-    const [meta, upper, lower] = await Promise.all([read('map.json'), read('2.json'), read('1.json')]);
+  const geometry = await (async () => {
+    const manifest = await fetch(new URL('./data/manifest.json', url)).then(r => r.json());
+    const read = name => fetch(new URL(`./data/${manifest.dataPath || ''}tramstation/${name}`, url)).then(r => r.json());
+    const [meta, upper, lower] = await Promise.all([read('map.json').then(decodeMap), read('2.json').then(decodeLevel), read('1.json').then(decodeLevel)]);
     for (let i = 0; i < upper.grid.length; i++) {
       const a = meta.definitions[upper.grid[i]], b = meta.definitions[lower.grid[i]];
       if (a?.aperture !== 255 || a.atoms.some(atom => !atom.path.startsWith('/turf/') && !atom.path.includes('/landmark')) || b?.aperture !== 0 || !b.turf.includes('/floor/')) continue;
@@ -167,7 +168,8 @@ try {
       }
     }
     return null;
-  });
+  })();
+
   assert.ok(geometry, 'Fixture station needs an opening above a floor');
   const cutawayUrl = new URL(url); cutawayUrl.searchParams.set('qa', 'cutaway');
   cutawayUrl.hash = `m=tramstation&z=2&x=${(geometry.x + .5) * 32}&y=${(geometry.y + .5) * 32}&s=2`;
@@ -181,7 +183,8 @@ try {
   await page.locator('#cutaway').uncheck(); await page.waitForTimeout(150);
   const solid = await pixels();
   assert.notDeepEqual(through[0], solid[0], 'Opening should expose the lower deck');
-  assert.deepEqual(through[1], solid[1], 'Opaque floor must block the lower deck');
+  // Premultiplied bitmaps may round nearly opaque sprite pixels by one unit.
+  assert.ok(through[1].every((value, index) => Math.abs(value - solid[1][index]) <= 1), `Opaque floor must block the lower deck: ${through[1]} vs ${solid[1]}`);
   await page.locator('#cutaway').check(); await page.waitForTimeout(150);
   await page.screenshot({ path: '.cache/qa/cutaway.png' });
   const asteroidUrl = new URL(url); asteroidUrl.searchParams.set('qa','asteroid');

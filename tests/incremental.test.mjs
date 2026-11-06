@@ -16,7 +16,7 @@ test('incremental exporter reuses unchanged maps and invalidates map, sprite, in
  const commit=()=>{git(['add','.']);git(['-c','user.name=Atlas test','-c','user.email=atlas@example.test','commit','--allow-empty','-m','fixture']);config.ref=git(['rev-parse','HEAD']);put('atlas.config.json',JSON.stringify(config));put('.source/provenance.json',JSON.stringify({repository:config.repository,commit:config.ref}));};
  const baseline=()=>cpSync(path.join(workspace,'public/data'),path.join(workspace,'.cache/baseline/data'),{recursive:true});
  const run=(...args)=>{execFileSync(process.execPath,['scripts/export.mjs',...args],{cwd:workspace,encoding:'utf8',timeout:120000});return JSON.parse(readFileSync(path.join(workspace,'public/data/build-report.json')));};
- const pixels=id=>readFileSync(path.join(workspace,`public/data/${id}/1/base-0-0.webp`));
+ const pixels=id=>readFileSync(path.join(workspace,`public/data/${id}/1/c-0-0.webp`));
  try{
   cpSync('scripts',path.join(workspace,'scripts'),{recursive:true});cpSync('package.json',path.join(workspace,'package.json'));cpSync('pnpm-lock.yaml',path.join(workspace,'pnpm-lock.yaml'));cpSync('NOTICE',path.join(workspace,'NOTICE'));
   symlinkSync(path.resolve('node_modules'),path.join(workspace,'node_modules'),process.platform==='win32'?'junction':'dir');
@@ -38,7 +38,7 @@ test('incremental exporter reuses unchanged maps and invalidates map, sprite, in
   code=code.replace('#ffffff','#aaffaa');put('.source/S.P.L.U.R.T-tg/code/main.dm',code);commit();report=run('--incremental');assert.deepEqual(report.rebuilt,['one','two'],'Shared parent changes invalidate both maps');baseline();
   const file=path.join(workspace,'.cache/baseline/data/manifest.json'),legacy=JSON.parse(readFileSync(file));delete legacy.converter;for(const map of legacy.maps){delete map.fingerprint;delete map.inputs;}writeFileSync(file,JSON.stringify(legacy));
   report=run('--incremental','--adopt-baseline');assert.deepEqual(report.rebuilt,[],'Same-revision legacy output is adopted after metadata verification');baseline();
-  rmSync(path.join(workspace,'.cache/baseline/data/one/1/base-0-0.webp'));report=run('--incremental');assert.deepEqual(report.rebuilt,['one'],'Missing cached assets require conversion');baseline();
+  rmSync(path.join(workspace,'.cache/baseline/data/one/1/c-0-0.webp'));report=run('--incremental');assert.deepEqual(report.rebuilt,['one'],'Missing cached assets require conversion');baseline();
   report=run('--incremental','--full');assert.deepEqual(report.rebuilt,['one','two']);
   const generate=async()=>{const controller=localGenerator(workspace);controller.debounce=0;await controller.tick();await controller.active?.promise;assert.equal(controller.status,null,controller.status?.message);await controller.close();};
   await generate();

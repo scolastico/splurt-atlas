@@ -2,6 +2,7 @@ import './style.css';
 import { detailForZoom, deckScale, selectedTile, viewFragment, optionBits,encodeOptions,decodeOptions } from './view-state.js';
 import { AssetCache } from './asset-cache.js';
 import { indexDoorTiles, doorMarkersForRoles, roleSuggestions, groupDoorAccess } from './door-highlights.js';
+import { UTILITIES, slotIndex, hasChannel, stripName, decodeMap, decodeLevel } from '../scripts/lib/map-format.mjs';
 
 const $ = id => document.getElementById(id);
 if (import.meta.env.VITE_ATLAS_SOURCE_URL) { $('atlas-source').href = import.meta.env.VITE_ATLAS_SOURCE_URL; $('atlas-source').hidden = false; }
@@ -9,7 +10,6 @@ const canvas = $('map'), ctx = canvas.getContext('2d');
 const connectionsCanvas = $('connection-overlay'), connectionsContext = connectionsCanvas.getContext('2d');
 let connectionsFrame = 0, lastConnectionsPaint = 0;
 const space = $('space'), background = space.getContext('2d', { alpha: false });
-const scratch = document.createElement('canvas'), sc = scratch.getContext('2d');
 const layer = document.createElement('canvas'), lc = layer.getContext('2d');
 const palette = { pipes: '#68c8b2', power: '#e5bd69', fluid:'#a798e5', disposal: '#ce8baf', transit: '#80addb' };
 const networkNames = { pipes: 'Atmospherics', power: 'Power cables', fluid:'Fluid ducts', disposal: 'Waste disposal', transit: 'Transit tubes' };
@@ -39,9 +39,10 @@ let suggestedRoles=[],suggestedRoleIndex=0;
 let panelTransitionUntil=0;
 const FINDINGS_PER_PAGE = 30;
 const images = new Map(), queue = [], failures = new Set();
-const CACHE_BYTES = 128 * 1024 * 1024, MAX_REQUESTS = 8;
-let warmImages=new Set(),loadingStation=false,inspectedResult=null,tileSeq=0,tileCandidates=[];
+const CACHE_BYTES = 128 * 1024 * 1024, MAX_REQUESTS = 12;
+let warmImages=new Set(),loadingStation=false,inspectedResult=null,tileSeq=0,tileCandidates=[],imageBytes=0,scaleText='';
 let frameImages = new Set(), spaceFrame = 0, spaceTime = 0, lastSpaceTime = null, lastSpacePaint = 0;
+const regionChunks=new Map(),areaColors=new Map();
 const redraw = () => { if (!frame) frame = requestAnimationFrame(render); };
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -121,59 +122,70 @@ async function chooseStorage(){
   await new Promise(resolve=>{for(const button of dialog.querySelectorAll('[data-storage-mode]'))button.onclick=()=>{assetCache.setMode(button.dataset.storageMode);$('storage-mode').value=assetCache.mode;dialog.close();resolve();};dialog.showModal();});
 }
 
+// Map-scoped resources carry their export version in the query string, so
+// hosts can mark them immutable while the file names stay stable.
+const resolve=path=>assetCache.versioned(new URL(path,dataBase),path);
 async function json(url, signal) {
   if(url==='manifest.json')return assetCache.catalog(new URL(url,base));
-  const blob=await assetCache.get(new URL(url,dataBase),url);
+  const blob=await assetCache.get(resolve(url),url);
   if(signal?.aborted)throw new DOMException('Map changed','AbortError');
   return JSON.parse(await blob.text());
 }
 
 function setLoading(message,show=true,progress=null){$('loading').hidden=!show;$('loading-message').textContent=message;if(progress===null)$('loading-progress').removeAttribute('value');else{$('loading-progress').max=1;$('loading-progress').value=progress;}}
 function requestReadyRedraw(){if(loadingStation)return;if([...frameImages].every(key=>images.get(key)?.ready||failures.has(key)))redraw();}
-function ensureImage(url){
-  if(images.has(url))return images.get(url);
-  const entry={ready:false,image:null,generation:state.generation};entry.promise=new Promise(resolve=>entry.resolve=resolve);
-  images.set(url,entry);queue.push({url,entry});drain();return entry;
+// Decode off the main thread where possible; drawing a freshly loaded
+// HTMLImageElement would otherwise decode synchronously inside the frame.
+// Premultiplied bitmaps draw about twice as fast in Chromium; their only cost
+// is a rounding error of one unit at translucent sprite edges.
+function decodeImage(blob){
+  if(typeof createImageBitmap==='function')return createImageBitmap(blob);
+  return new Promise((resolve,reject)=>{const url=URL.createObjectURL(blob),img=new Image();img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Image decode failed'));};img.src=url;});
 }
-
-function image(url) {
-  frameImages.add(url);
-  if (failures.has(url)) return null;
-  const cached = images.get(url);
+const imageSize=image=>(image.width||image.naturalWidth)*(image.height||image.naturalHeight)*4;
+function ensureImage(path,urgent=false){
+  if(images.has(path))return images.get(path);
+  const entry={path,ready:false,image:null,bytes:0,generation:state.generation,urgent};entry.promise=new Promise(resolve=>entry.resolve=resolve);
+  images.set(path,entry);urgent?queue.unshift(entry):queue.push(entry);drain();return entry;
+}
+function image(path) {
+  frameImages.add(path);
+  if (failures.has(path)) return null;
+  const cached = images.get(path);
   if (cached) {
-    images.delete(url); images.set(url, cached);
+    images.delete(path); images.set(path, cached);
+    // A strip that became visible jumps ahead of background warm-up loads.
+    if (!cached.ready && !cached.urgent) { cached.urgent = true; const index = queue.indexOf(cached); if (index > 0) { queue.splice(index, 1); queue.unshift(cached); } }
     return cached.ready ? cached.image : null;
   }
-  ensureImage(url);
+  ensureImage(path,true);
   return null;
 }
 function drain() {
   while (activeRequests < MAX_REQUESTS && queue.length) {
-    const { url, entry } = queue.shift();
-    if (entry.generation !== state.generation) { images.delete(url);entry.resolve(null);continue; }
+    const entry = queue.shift(), { path } = entry;
+    if (entry.generation !== state.generation) { if(images.get(path)===entry)images.delete(path);entry.resolve(null);continue; }
     activeRequests++;
-    const img = new Image();
-    img.onload = () => {
-      activeRequests--; entry.image = img; entry.ready = true;
-      URL.revokeObjectURL(img.src);entry.resolve(img);drain();requestReadyRedraw();
-    };
-    img.onerror = () => {
-      activeRequests--; failures.add(url); images.delete(url); drain();
-      URL.revokeObjectURL(img.src);entry.resolve(null);$('coords').textContent = 'Some image chunks failed · reload to retry';requestReadyRedraw();
-    };
-    assetCache.get(new URL(url,dataBase),url).then(blob=>{img.src=URL.createObjectURL(blob);}).catch(()=>img.onerror());
+    assetCache.get(resolve(path),path,entry.urgent?'high':'auto').then(decodeImage).then(bitmap=>{
+      activeRequests--;
+      if(images.get(path)!==entry){bitmap.close?.();entry.resolve(null);}
+      else{entry.image=bitmap;entry.bytes=imageSize(bitmap);imageBytes+=entry.bytes;entry.ready=true;entry.resolve(bitmap);}
+      drain();requestReadyRedraw();
+    }).catch(()=>{
+      activeRequests--; failures.add(path); if(images.get(path)===entry)images.delete(path); drain();
+      entry.resolve(null);$('coords').textContent = 'Some image chunks failed · reload to retry';requestReadyRedraw();
+    });
   }
 }
+function dropImage(path,entry){images.delete(path);if(entry.ready){imageBytes-=entry.bytes;entry.image.close?.();}}
+function clearImages(){for(const [path,entry]of images)dropImage(path,entry);for(const pending of queue)pending.resolve(null);queue.length=0;failures.clear();imageBytes=0;}
 function trimImages() {
-  let bytes = 0;
-  for (const entry of images.values()) if (entry.ready) bytes += entry.image.naturalWidth * entry.image.naturalHeight * 4;
+  if (imageBytes <= CACHE_BYTES) return;
   for (const [key, entry] of images) {
-    if (bytes <= CACHE_BYTES) break;
+    if (imageBytes <= CACHE_BYTES) break;
     // Protect this viewport's images: changing detail to satisfy a tile-count
     // budget caused the old border-dependent pixelation and cache churn.
-    if (entry.ready && !frameImages.has(key)&&!warmImages.has(key)&&!key.endsWith('-overview.webp')) {
-      bytes -= entry.image.naturalWidth * entry.image.naturalHeight * 4; images.delete(key);
-    }
+    if (entry.ready && !frameImages.has(key)&&!warmImages.has(key)&&!key.endsWith('/overview.webp')) dropImage(key,entry);
   }
 }
 
@@ -239,90 +251,108 @@ function worldTransform(target, depth = 0) {
   target.setTransform(state.dpr * scale, 0, 0, state.dpr * scale, state.dpr * (screenCenterX() - state.x * scale), state.dpr * (screenCenterY() - state.y * scale));
 }
 
-function channelImages(z,channel,zoom=state.zoom) {
-  const data = state.levels.get(z); if (!data) return;
-  const path = `${state.map.id}/${z}`;
-  const S = state.manifest.tilePixels, chunkSize = S * state.manifest.chunkTiles;
-  const natural=channel==='base'&&$('runtime-terrain').checked;
-  const overviewChannel=natural&&data.overviews?.includes('natural')?'natural':channel;
-  const scale = deckScale(zoom,state.z-z,state.motion), detail = detailForZoom(zoom);
+// Every chunk is one strip image containing all of its channels, so a deck
+// view costs one request per chunk and its channels always arrive together.
+function deckImages(z,zoom=state.zoom,viewZoom=zoom) {
+  const data = state.levels.get(z); if (!data) return null;
+  const S = state.manifest.tilePixels, chunkSize = S * state.manifest.chunkTiles, detail = detailForZoom(zoom), path = `${state.map.id}/${z}`;
+  if (detail === 'overview') {
+    // Lower decks only need the terrain strip; utilities show on the viewed deck.
+    const items=[];
+    for(const [file,mask]of [['overview',data.overview],['overview-utilities',z===state.z?data.overviewUtilities:0]])if(mask)items.push({path:`${path}/${file}.webp`,mask,x:0,y:0,w:state.map.width*S,h:state.map.height*S});
+    return {detail,slot:[state.map.width*4,state.map.height*4],items};
+  }
+  const scale = deckScale(viewZoom,state.z-z,state.motion);
   const left = state.x - screenCenterX() / scale - S, top = state.y - screenCenterY() / scale - S;
   const right = left + state.w / scale + S * 2, bottom = top + state.h / scale + S * 2;
-  const visible = (data.chunks[channel] || []).filter(([cx, cy]) => !((cx + 1) * chunkSize < left || cx * chunkSize > right || (cy + 1) * chunkSize < top || cy * chunkSize > bottom));
-  if (detail === 'overview' && data.overviews?.includes(channel)) {
-    return [{path:`${path}/${overviewChannel}-overview.webp`,x:0,y:0,w:state.map.width*S,h:state.map.height*S}];
-  }
-  return visible.map(([cx,cy])=>{
-    const suffix = typeof detail === 'number' && detail > 0 && data.mips?.includes(detail) ? `-mip${detail}` : '';
-    const prefix=natural&&data.chunks.natural?.some(([x,y])=>x===cx&&y===cy)?'natural':channel;
-    return {path:`${path}/${prefix}-${cx}-${cy}${suffix}.webp`,x:cx*chunkSize,y:cy*chunkSize,w:chunkSize,h:chunkSize};
-  });
+  // Coarser levels pack 2×2 finer tiles per strip, so the image count per
+  // frame stays similar at every zoom.
+  const lod=Math.min(detail,data.pyramid.length-1), span=chunkSize<<lod, items=[];
+  for(const [tx,ty,mask]of data.pyramid[lod])if(!((tx + 1) * span < left || tx * span > right || (ty + 1) * span < top || ty * span > bottom))items.push({path:`${path}/${stripName(tx,ty,lod)}`,mask,x:tx*span,y:ty*span,w:span,h:span});
+  return {detail,slot:[chunkSize,chunkSize],items};
 }
-function drawChannel(target,z,channel,depth){
-  const desired=channelImages(z,channel)||[];if(!desired.length)return;
-  worldTransform(target,depth);target.imageSmoothingEnabled=false;
-  const loaded=desired.map(item=>({...item,image:image(item.path)}));
-  for(const item of desired)assetCache.priorityPaths?.add(item.path);
-  let chosen=loaded.every(item=>item.image)?loaded:null;
-  if(!chosen)for(const zoom of [state.zoom/2,state.zoom/4,.01]){
-    const fallback=(channelImages(z,channel,zoom)||[]).map(item=>({...item,image:images.get(item.path)?.image}));
-    if(fallback.length&&fallback.every(item=>item.image)){chosen=fallback;break;}
+// Whole decks switch resolution only when every requested strip is ready;
+// until then the finest fully cached coarser set stays on screen.
+function resolveDeck(z){
+  const wanted=deckImages(z);if(!wanted)return null;
+  for(const item of wanted.items){item.image=image(item.path);assetCache.priorityPaths?.add(item.path);}
+  if(wanted.items.every(item=>item.image||failures.has(item.path)))return wanted;
+  let tried=wanted.detail;
+  for(const zoom of [state.zoom/2,state.zoom/4,.01]){
+    const set=deckImages(z,zoom,state.zoom);if(!set||set.detail===tried)continue;tried=set.detail;
+    for(const item of set.items)item.image=images.get(item.path)?.image;
+    if(set.items.length&&set.items.every(item=>item.image)){for(const item of set.items)frameImages.add(item.path);return set;}
   }
-  if(!chosen){const path=`${state.map.id}/${z}/${channel}-overview.webp`;if(state.levels.get(z).overviews?.includes(channel))image(path);return;}
-  for(const item of chosen){frameImages.add(item.path);target.drawImage(item.image,item.x,item.y,item.w,item.h);}
+  if(wanted.detail!=='overview'){const set=deckImages(z,.01,state.zoom);for(const item of set.items)item.image=image(item.path);if(set.items.length&&set.items.every(item=>item.image))return set;}
+  return null;
 }
+function drawDeck(target,z,set,channels){
+  worldTransform(target,state.z-z);target.imageSmoothingEnabled=false;
+  const natural=$('runtime-terrain').checked,[slotWidth,slotHeight]=set.slot;
+  for(const channel of channels)for(const item of set.items){
+    if(!item.image)continue;
+    const slot=slotIndex(item.mask,channel==='base'&&natural&&hasChannel(item.mask,'natural')?'natural':channel);
+    if(slot>=0)target.drawImage(item.image,0,slot*slotHeight,slotWidth,slotHeight,item.x,item.y,item.w,item.h);
+  }
+}
+function deckChannels(z){
+  const channels=['base'];
+  if(z===state.z){const simple=$('simple-utilities').checked&&state.map.infrastructure?.nodes?.length;for(const channel of UTILITIES){if(simple&&['power','pipes'].includes(channel))continue;channels.push(channel+'-surface');if(enabled.has(channel))channels.push(channel);}}
+  channels.push('foreground');return channels;
+}
+// Block only on what the first frame draws; zoom neighbors load afterwards so
+// the first zoom step needs no new requests without delaying the station.
 async function prepareView(generation){
-  const paths=new Set();
-  for(const z of state.map.levels){
-    const data=state.levels.get(z);
-    for(const channel of data.overviews||[])paths.add(`${state.map.id}/${z}/${channel}-overview.webp`);
-    if(z>state.z)continue;
-    for(const zoom of [state.zoom,state.zoom/1.5,state.zoom/2,state.zoom*1.5]){
-      for(const channel of ['base','foreground',...(z===state.z?['disposal-surface','pipes-surface','power-surface','fluid-surface',...enabled]:[])])for(const item of channelImages(z,channel,zoom)||[])paths.add(item.path);
-    }
+  const first=new Set(),warm=new Set();
+  const levels=state.map.levels.filter(z=>z<=state.z&&(state.cutaway||z===state.z));
+  for(const z of state.map.levels)if(state.levels.get(z)?.overview)(z<=state.z?first:warm).add(`${state.map.id}/${z}/overview.webp`);
+  for(const z of levels){
+    for(const item of deckImages(z).items)first.add(item.path);
+    for(const zoom of [state.zoom/1.5,state.zoom/2,state.zoom*1.5])for(const item of deckImages(z,zoom)?.items||[])if(!first.has(item.path))warm.add(item.path);
   }
-  warmImages=paths;assetCache.priorityPaths=new Set([`${state.map.id}/map.json`,`${state.map.id}/search.json`,`${state.map.id}/${state.z}.json`,...paths]);let count=0;
-  await Promise.all([...paths].map(async path=>{await ensureImage(path).promise;if(generation===state.generation)setLoading(`Preparing smooth zoom · ${++count} / ${paths.size} images`,true,count/paths.size);}));
+  warmImages=new Set([...first,...warm]);assetCache.priorityPaths=new Set([`${state.map.id}/map.json`,`${state.map.id}/search.json`,`${state.map.id}/${state.z}.json`,...first,...warm]);let count=0;
+  for(const path of first)ensureImage(path,true);
+  for(const path of warm)ensureImage(path);
+  await Promise.all([...first].map(async path=>{await images.get(path)?.promise;if(generation===state.generation)setLoading(`Decoding the current view · ${++count} / ${first.size} images`,true,count/first.size);}));
 }
 
 function render() {
   frame = 0;
   if(performance.now()<panelTransitionUntil)redraw();
-  canvas.dataset.detail=String(detailForZoom(state.zoom));
+  const detail=String(detailForZoom(state.zoom));if(canvas.dataset.detail!==detail)canvas.dataset.detail=detail;
   frameImages = new Set();
   if(state.map)assetCache.priorityPaths=new Set([`${state.map.id}/map.json`,`${state.map.id}/search.json`,`${state.map.id}/${state.z}.json`]);
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over';
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawBackground();
+  // The space background lives on its own canvas: the animation loop repaints
+  // it while motion is on, and it is static otherwise.
   updateConnectionHighlights();
   if (!state.map||!state.ready) return;
-  const levels = state.map.levels.filter(z => z <= state.z && (state.cutaway || z === state.z));
-  sc.setTransform(1, 0, 0, 1, 0, 0); sc.clearRect(0, 0, scratch.width, scratch.height);
-  for (const z of levels) {
+  const lower = state.cutaway ? state.map.levels.filter(z => z < state.z) : [];
+  if (lower.length) {
+    // Shade deeper decks without changing their opacity: an opaque middle
+    // floor must still occlude deeper floors. Preserve transparent sprite
+    // edges instead of cutting an entire 32px cell out of the lower deck.
+    // All lower decks share one layer; each shade step is chosen so that a
+    // deck's accumulated shade equals its own depth shade (mixing toward one
+    // color is linear, so this matches shading every deck separately).
+    const shade = depth => Math.min(.45, depth * .14);
     lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, layer.width, layer.height);
-    drawChannel(lc, z, 'base', state.z - z);
-    if (z === state.z) for (const channel of ['disposal','pipes','power','fluid','transit']) {
-      if($('simple-utilities').checked&&state.map.infrastructure?.nodes?.length&&['power','pipes'].includes(channel))continue;
-      drawChannel(lc,z,channel+'-surface',0);
-      if(enabled.has(channel))drawChannel(lc,z,channel,0);
-    }
-    drawChannel(lc,z,'foreground',state.z-z);
-    if (z !== state.z) {
-      // Shade deeper decks without changing their opacity: an opaque middle
-      // floor must still occlude deeper floors. Preserve transparent sprite
-      // edges instead of cutting an entire 32px cell out of the lower deck.
+    for (const [index, z] of lower.entries()) {
+      const set = resolveDeck(z); if (set) drawDeck(lc, z, set, deckChannels(z));
+      const own = shade(state.z - z), next = index + 1 < lower.length ? shade(state.z - lower[index + 1]) : 0;
       lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalCompositeOperation = 'source-atop';
-      lc.fillStyle = `rgba(5,12,22,${Math.min(.45, (state.z - z) * .14)})`;
+      lc.fillStyle = `rgba(5,12,22,${1 - (1 - own) / (1 - next)})`;
       lc.fillRect(0, 0, layer.width, layer.height); lc.globalCompositeOperation = 'source-over';
     }
-    sc.setTransform(1, 0, 0, 1, 0, 0); sc.drawImage(layer, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0);
   }
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(scratch, 0, 0);
+  const top = resolveDeck(state.z); if (top) drawDeck(ctx, state.z, top, deckChannels(state.z));
   drawInfrastructure();
   drawAnnotations();
   trimImages();
-  const tileWidth = 32 * state.zoom;
-  $('scale').textContent = `${Math.max(1, Math.round(70 / tileWidth))} tiles / ${Math.round(state.zoom * 100)}%`;
+  const tileWidth = 32 * state.zoom, scale = `${Math.max(1, Math.round(70 / tileWidth))} tiles / ${Math.round(state.zoom * 100)}%`;
+  if (scale !== scaleText) $('scale').textContent = scaleText = scale;
   if (!reduced.matches && performance.now() - pulseStart < 1400) redraw();
 }
 function drawInfrastructure(){
@@ -346,11 +376,17 @@ function drawInfrastructure(){
 }
 
 // Animate only this transparent overlay; the station's cached canvas stays idle.
+let overlayPainted = false;
 function drawConnectionHighlights(time = performance.now()) {
   const target = connectionsContext;
+  const ready = state.ready && state.map && !document.hidden;
+  const wanted = ready && !!(doorMarkers.length || state.markers.length || (state.selected?.z === state.z && state.offsetHighlights?.size) || ($('connections').checked && state.map.infrastructure?.transitions?.length));
+  // Skip the full-screen clear while the overlay is empty and stays empty.
+  if (!wanted && !overlayPainted) return false;
   target.setTransform(1, 0, 0, 1, 0, 0);
   target.clearRect(0, 0, connectionsCanvas.width, connectionsCanvas.height);
-  if (!state.ready || !state.map || document.hidden) return false;
+  overlayPainted = false;
+  if (!wanted) return false;
   worldTransform(target);
   const centerX=screenCenterX(),centerY=screenCenterY();
   const pulse = reduced.matches ? .5 : (1 + Math.sin(time * Math.PI * 2 / 1800)) / 2;
@@ -398,6 +434,7 @@ function drawConnectionHighlights(time = performance.now()) {
       target.lineCap = 'butt'; target.lineJoin = 'miter';
     }
   }
+  overlayPainted = visible;
   return visible;
 }
 function animateConnections(time) {
@@ -418,6 +455,26 @@ function regionColor(area) {
   let hash = 0; for (const c of area) hash = (hash * 31 + c.charCodeAt(0)) | 0;
   return `hsl(${Math.abs(hash) % 360} 48% 64%)`;
 }
+function areaColor(index) {
+  let color = areaColors.get(index);
+  if (!color) areaColors.set(index, color = regionColor(state.map.areas[index].path));
+  return color;
+}
+function regionChunk(z, cx, cy) {
+  const key = `${z}:${cx},${cy}`;
+  let byArea = regionChunks.get(key); if (byArea) return byArea;
+  const map = state.map, data = state.levels.get(z), C = state.manifest.chunkTiles; byArea = new Map();
+  for (let y = cy * C; y < Math.min(map.height, (cy + 1) * C); y++) for (let x = cx * C; x < Math.min(map.width, (cx + 1) * C); x++) {
+    const def = map.definitions[data.grid[y * map.width + x]]; if (!def || def.turf.includes('/space')) continue;
+    let paths = byArea.get(def.area); if (!paths) byArea.set(def.area, paths = { fill: new Path2D(), edge: new Path2D() });
+    paths.fill.rect(x * 32, y * 32, 32, 32);
+    for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      const neighbor = x + dx < map.width && y + dy < map.height ? map.definitions[data.grid[(y + dy) * map.width + x + dx]] : undefined;
+      if (neighbor?.area !== def.area) { paths.edge.moveTo((x + dx) * 32, (y + dy) * 32); paths.edge.lineTo((x + 1) * 32, (y + 1) * 32); }
+    }
+  }
+  regionChunks.set(key, byArea); return byArea;
+}
 
 function drawAnnotations() {
   const map = state.map, data = state.levels.get(state.z); if (!data) return;
@@ -427,19 +484,23 @@ function drawAnnotations() {
   const right = Math.min(map.width, Math.ceil((state.x + (state.w - screenCenterX()) / state.zoom) / 32));
   const bottom = Math.min(map.height, Math.ceil((state.y + (state.h-screenCenterY()) / state.zoom) / 32));
   if (state.regions) {
-    const labels = new Map();
-    for (let y = top; y < bottom; y++) for (let x = left; x < right; x++) {
-      const def = map.definitions[data.grid[y * map.width + x]]; if (!def || def.turf.includes('/space')) continue;
-      const area = map.areas[def.area], color = regionColor(area.path);
-      ctx.globalAlpha = .14; ctx.fillStyle = color; ctx.fillRect(x * 32, y * 32, 32, 32); ctx.globalAlpha = .8; ctx.strokeStyle = color;
-      for (const [dx, dy] of [[1, 0], [0, 1]]) {
-        const neighbor = map.definitions[data.grid[(y + dy) * map.width + x + dx]];
-        if (neighbor?.area !== def.area) { ctx.beginPath(); ctx.moveTo((x + dx) * 32, (y + dy) * 32); ctx.lineTo((x + 1) * 32, (y + 1) * 32); ctx.stroke(); }
+    // Fills and boundaries are cached per chunk as one path per area, so a
+    // frame strokes a few paths per chunk instead of every visible tile.
+    const C = state.manifest.chunkTiles;
+    for (let cy = Math.floor(top / C); cy * C < bottom; cy++) for (let cx = Math.floor(left / C); cx * C < right; cx++) {
+      for (const [area, paths] of regionChunk(state.z, cx, cy)) {
+        const color = areaColor(area);
+        ctx.globalAlpha = .14; ctx.fillStyle = color; ctx.fill(paths.fill);
+        ctx.globalAlpha = .8; ctx.strokeStyle = color; ctx.stroke(paths.edge);
       }
-      if (!labels.has(def.area)) labels.set(def.area, [x, y]);
     }
     ctx.globalAlpha = 1;
-    if (state.zoom > .55) for (const [area, [x, y]] of labels) {
+    const labels = new Map();
+    if (state.zoom > .55) for (let y = top; y < bottom; y++) for (let x = left; x < right; x++) {
+      const def = map.definitions[data.grid[y * map.width + x]];
+      if (def && !labels.has(def.area) && !def.turf.includes('/space')) labels.set(def.area, [x, y]);
+    }
+    for (const [area, [x, y]] of labels) {
       ctx.font = `${10 / state.zoom}px 'IBM Plex Mono',monospace`; ctx.fillStyle = '#eff4ee'; ctx.strokeStyle = '#0c1824'; ctx.lineWidth = 3 / state.zoom;
       const label = map.areas[area].name; ctx.strokeText(label, x * 32 + 8, y * 32 + 18); ctx.fillText(label, x * 32 + 8, y * 32 + 18);
     }
@@ -457,8 +518,8 @@ function drawAnnotations() {
 
 function resize() {
   const rect = canvas.getBoundingClientRect(); state.w = rect.width; state.h = rect.height; state.dpr = Math.min(devicePixelRatio || 1, 2);
-  canvas.width = scratch.width = layer.width = Math.round(state.w * state.dpr);
-  canvas.height = scratch.height = layer.height = Math.round(state.h * state.dpr);
+  canvas.width = layer.width = Math.round(state.w * state.dpr);
+  canvas.height = layer.height = Math.round(state.h * state.dpr);
   space.width = connectionsCanvas.width = canvas.width; space.height = connectionsCanvas.height = canvas.height;
   // ResizeObserver runs before paint. Repaint synchronously so resizing never
   // presents a freshly cleared canvas for one frame.
@@ -467,13 +528,7 @@ function resize() {
 new ResizeObserver(resize).observe(canvas);
 function fit() {
   if (!state.map) return;
-  const map = state.map, grid = state.levels.get(state.z)?.grid;
-  let minX = map.width, minY = map.height, maxX = 0, maxY = 0;
-  if (grid) for (let y = 0; y < map.height; y++) for (let x = 0; x < map.width; x++) {
-    const def = map.definitions[grid[y * map.width + x]];
-    if (def && !/\/space(?:\/|$)|\/openspace/.test(def.turf)) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x + 1); maxY = Math.max(maxY, y + 1); }
-  }
-  if (maxX <= minX) { minX = minY = 0; maxX = map.width; maxY = map.height; }
+  const map = state.map, [minX, minY, maxX, maxY] = state.levels.get(state.z)?.bounds || [0, 0, map.width, map.height];
   state.x = (minX + maxX) * 16; state.y = (minY + maxY) * 16;
   state.zoom = Math.max(.05, Math.min((state.w - sidebarInset() - 130) / ((maxX - minX) * 32), (state.h - bottomSidebarInset() - (portraitPanel()?90:180)) / ((maxY - minY) * 32), 1));
   redraw(); share();
@@ -511,14 +566,14 @@ async function loadStation(id, restore = false) {
   updateSearchReset();
   state.placed = $('placed').checked; state.possible = $('possible').checked;
   loadAbort?.abort(); loadAbort = new AbortController();
-  state.map = null; state.levels.clear(); state.markers = []; state.selected = null; images.clear();for(const pending of queue)pending.entry.resolve(null);queue.length=0; failures.clear();
+  state.map = null; state.levels.clear(); state.markers = []; state.selected = null; clearImages();regionChunks.clear();areaColors.clear();
   $('inspect-tab').disabled = true; sidebarView(false);
   $('loading').classList.remove('error');setLoading('Reading station archive…');
   $('results').replaceChildren(); state.searchReady = false; $('search-status').textContent = 'Preparing search index…';
   $('search').disabled=true;
   try {
-    const signal = loadAbort.signal, meta = await json(`${id}/map.json`, signal);
-    const levelData = await Promise.all(meta.levels.map(z => json(`${id}/${z}.json`, signal)));
+    const signal = loadAbort.signal, meta = decodeMap(await json(`${id}/map.json`, signal));
+    const levelData = (await Promise.all(meta.levels.map(z => json(`${id}/${z}.json`, signal)))).map(decodeLevel);
     if (generation !== state.generation) return;
     state.map = meta; state.levels = new Map(levelData.map(level => [level.z, level]));
     doorTiles=indexDoorTiles(meta,state.levels);
@@ -568,8 +623,10 @@ async function loadStation(id, restore = false) {
         selectFinding(index, { focus: !restoring });
       }
     };
-    const searchItems=await json(`${id}/search.json`,signal);if(generation!==state.generation)return;
-    worker.postMessage({ type: 'init', items:searchItems, generation, rooms: meta.rooms || [] });
+    // The worker parses and decodes the search records itself; transferring the
+    // bytes avoids cloning a large object graph through the main thread.
+    const searchBytes=await(await assetCache.get(resolve(`${id}/search.json`),`${id}/search.json`)).arrayBuffer();if(generation!==state.generation)return;
+    worker.postMessage({ type: 'init', buffer:searchBytes, generation, rooms: meta.rooms || [] },[searchBytes]);
     await Promise.all([prepareView(generation),indexReady]);if(generation!==state.generation)return;
     state.ready=true;loadingStation=false;assetCache.foregroundBusy=false;canvas.style.pointerEvents='';setLoading('',false);$('source-status').textContent = 'ARCHIVE READY';redraw();
     $('search').disabled=false;for(const button of $('results').children)button.disabled=false;
@@ -815,8 +872,8 @@ function showMapPicker(){
     const card=document.createElement('div');card.className='map-card-entry';card.append(button);
     $('map-cards').append(card);
     if(map.preview===null)continue;
-    const path=($('runtime-terrain').checked&&map.naturalPreview)||map.preview||`${map.id}/${map.levels.at(-1)}/base-overview.webp`;
-    assetCache.get(new URL(path,dataBase),path).then(blob=>{const url=URL.createObjectURL(blob),img=button.querySelector('img');img.onload=()=>URL.revokeObjectURL(url);img.src=url;}).catch(()=>{});
+    const path=($('runtime-terrain').checked&&map.naturalPreview)||map.preview||`${map.id}/preview.webp`;
+    assetCache.get(resolve(path),path).then(blob=>{const url=URL.createObjectURL(blob),img=button.querySelector('img');img.onload=()=>URL.revokeObjectURL(url);img.src=url;}).catch(()=>{});
   }
   redraw();
 }

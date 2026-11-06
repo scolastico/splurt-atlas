@@ -1,11 +1,13 @@
 import { createSearchIndex } from './search-index.js';
+import { decodeSearch } from '../scripts/lib/map-format.mjs';
 let index;
 self.onmessage = async ({ data }) => {
   if (data.type === 'init') {
     index = null;
     try {
       let items=data.items;
-      if(!items){const response=await fetch(data.url);if(!response.ok)throw new Error(`Search archive: HTTP ${response.status}`);items=await response.json();}
+      if(data.buffer)items=decodeSearch(JSON.parse(new TextDecoder().decode(data.buffer)));
+      if(!items){const response=await fetch(data.url);if(!response.ok)throw new Error(`Search archive: HTTP ${response.status}`);items=decodeSearch(await response.json());}
       index = createSearchIndex(items, data.rooms);
       self.postMessage({ type: 'ready', generation: data.generation });
     } catch (error) { self.postMessage({ type: 'error', message: error.message, generation: data.generation }); }

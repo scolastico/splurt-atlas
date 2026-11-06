@@ -1,8 +1,9 @@
+import {decodeMap,decodeLevel} from './lib/map-format.mjs';
 import {chromium} from '@playwright/test';import assert from 'node:assert/strict';import {mkdirSync,writeFileSync} from 'node:fs';
 const url=process.env.ATLAS_URL||'http://127.0.0.1:5173/',catalog=await fetch(new URL('data/manifest.json',url)).then(r=>r.json()),root=new URL(`data/${catalog.dataPath||''}`,url);
-const ice=await fetch(new URL('icebox/map.json',root)).then(r=>r.json()),level=await fetch(new URL('icebox/3.json',root)).then(r=>r.json()),index=level.grid.findIndex(id=>ice.definitions[id]?.runtimeTerrain),x=index%ice.width+1,y=ice.height-Math.floor(index/ice.width);
-const tram=await fetch(new URL('tramstation/map.json',root)).then(r=>r.json());const broad=tram.definitions.findIndex(d=>d.atoms.some(a=>a.doorAccess?.kind==='restricted'&&a.doorAccess.roles.length>tram.jobRoles.length/2));let door;
-for(const z of tram.levels){const grid=await fetch(new URL(`tramstation/${z}.json`,root)).then(r=>r.json()),i=grid.grid.indexOf(broad);if(i>=0){door={x:i%tram.width+1,y:tram.height-Math.floor(i/tram.width),z};break;}}
+const ice=decodeMap(await fetch(new URL('icebox/map.json',root)).then(r=>r.json())),level=decodeLevel(await fetch(new URL('icebox/3.json',root)).then(r=>r.json())),index=level.grid.findIndex(id=>ice.definitions[id]?.runtimeTerrain),x=index%ice.width+1,y=ice.height-Math.floor(index/ice.width);
+const tram=decodeMap(await fetch(new URL('tramstation/map.json',root)).then(r=>r.json()));const broad=tram.definitions.findIndex(d=>d.atoms.some(a=>a.doorAccess?.kind==='restricted'&&a.doorAccess.roles.length>tram.jobRoles.length/2));let door;
+for(const z of tram.levels){const grid=decodeLevel(await fetch(new URL(`tramstation/${z}.json`,root)).then(r=>r.json())),i=grid.grid.indexOf(broad);if(i>=0){door={x:i%tram.width+1,y:tram.height-Math.floor(i/tram.width),z};break;}}
 const browser=await chromium.launch({headless:false}),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.addInitScript(()=>localStorage.setItem('atlas-storage-mode','none'));
 try{
  const target=new URL(url);target.hash=`m=icebox&z=3&x=${(x-.5)*32}&y=${(ice.height-y+.5)*32}&s=1`;

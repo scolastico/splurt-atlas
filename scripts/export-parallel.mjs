@@ -4,6 +4,7 @@ import { availableParallelism, totalmem } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { converterDigest, loadBaseline, reuseMap } from './lib/incremental.mjs';
+import { SCHEMA } from './lib/map-format.mjs';
 import { exportProgress } from './export-progress.mjs';
 import { promote } from './promote.mjs';
 
@@ -44,7 +45,7 @@ export async function parallelExport() {
   mkdirSync(output, { recursive: true });
   const progress = exportProgress(), baseline = loadBaseline(process.env.ATLAS_BASELINE || '.cache/baseline/data');
   const count = workerCount(maps.length), groups = distributeMaps(maps, count, baseline);
-  const manifest = { schema: 2, buildId: randomUUID(), converter: converterDigest(), ...provenance, tilePixels: config.tilePixels, chunkTiles: config.chunkTiles, maps: [] };
+  const manifest = { schema: SCHEMA, buildId: randomUUID(), converter: converterDigest(), ...provenance, tilePixels: config.tilePixels, chunkTiles: config.chunkTiles, maps: [] };
   const merged = new Set(), jobs = [], workers = path.join(output, 'workers');
   mkdirSync(workers);
   const save = complete => {
