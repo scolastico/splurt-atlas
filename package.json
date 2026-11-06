@@ -6,7 +6,7 @@
   "license": "AGPL-3.0-or-later",
   "packageManager": "pnpm@10.28.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   },
   "scripts": {
     "source": "node scripts/source.mjs",
@@ -15,17 +15,19 @@
     "dev": "vite --host 127.0.0.1",
     "build": "node scripts/check-data.mjs && node scripts/package-maps.mjs && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test tests/*.test.mjs",
+    "test": "tsc --noEmit && node --test tests/*.test.mjs",
     "package:maps": "node scripts/package-maps.mjs",
     "audit:offsets": "node scripts/audit-offsets.mjs",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@playwright/test": "1.58.0",
     "fake-indexeddb": "6.2.7",
     "prettier": "3.8.3",
     "sharp": "0.34.5",
+    "typescript": "^7.0.2",
     "vite": "7.3.1"
   },
   "dependencies": {
