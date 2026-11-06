@@ -1,7 +1,7 @@
 // Extracts a map ZIP off the main thread. Each batch waits for the page to
 // acknowledge it, so extraction never runs ahead of IndexedDB writes.
 /// <reference lib="webworker" />
-import { extractArchive, type ExtractedAsset } from './archive-extract.ts';
+import { extractArchive, type ExtractedAsset } from '../data/archive-extract.ts';
 
 export interface ArchiveWorkerRequest {
   blob: Blob;

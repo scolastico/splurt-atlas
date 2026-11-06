@@ -2,8 +2,8 @@
 // Every tile is one strip image containing all of its channels, so a deck view
 // costs one request per tile and its channels always arrive together.
 import { renderer } from './canvases.ts';
-import { assetCache } from './data.ts';
-import { isChecked } from './dom.ts';
+import { assetCache } from '../data/source.ts';
+import { isChecked } from '../core/dom.ts';
 import type { TextureHandle } from './gl-renderer.ts';
 import {
   ensureImage,
@@ -13,12 +13,12 @@ import {
   prefetchImages,
   setWarmImages,
 } from './images.ts';
-import { setLoading } from './loading.ts';
+import { setLoading } from '../ui/loading.ts';
 import { screenCenterX, screenCenterY } from './projection.ts';
-import { enabledNetworks, state, type DeckLevel } from './state.ts';
-import type { Network } from './types.ts';
-import { deckScale, detailForZoom, type Detail } from './view-state.ts';
-import { UTILITIES, slotIndex, stripName } from '../scripts/lib/map-format.mjs';
+import { enabledNetworks, state, type DeckLevel } from '../core/state.ts';
+import type { Network } from '../core/types.ts';
+import { deckScale, detailForZoom, type Detail } from '../model/view-state.ts';
+import { UTILITIES, slotIndex, stripName } from '../../scripts/lib/map-format.mjs';
 
 export interface DeckTile {
   path: string;

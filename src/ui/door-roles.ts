@@ -6,11 +6,11 @@ import {
   roleSuggestions,
   type DoorMarker,
   type DoorTile,
-} from './door-highlights.ts';
-import { $ } from './dom.ts';
-import { redraw } from './frame.ts';
-import { state } from './state.ts';
-import type { MapMeta } from './types.ts';
+} from '../model/door-highlights.ts';
+import { $ } from '../core/dom.ts';
+import { redraw } from '../core/frame.ts';
+import { state } from '../core/state.ts';
+import type { MapMeta } from '../core/types.ts';
 import { share } from './url-state.ts';
 
 let doorTiles: DoorTile[] = [];

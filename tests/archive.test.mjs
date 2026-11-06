@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
 import { packageMaps } from '../scripts/package-maps.mjs';
-import { extractArchive } from '../src/archive-extract.ts';
+import { extractArchive } from '../src/data/archive-extract.ts';
 
 test('map ZIPs round-trip every indexed asset with deterministic bytes and correct MIME types', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'atlas-zip-'));

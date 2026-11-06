@@ -2,7 +2,7 @@
 // the selection. Modules read and update it directly; `redraw()` in frame.ts
 // schedules the next paint after a change.
 import type { LevelData, Manifest, MapMeta, Network } from './types.ts';
-import type { TileRef } from './view-state.ts';
+import type { TileRef } from '../model/view-state.ts';
 
 /** A decoded deck plus a lookup of strip masks per zoom level, keyed "x,y". */
 export interface DeckLevel extends LevelData {

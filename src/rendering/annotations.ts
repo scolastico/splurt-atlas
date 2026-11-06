@@ -1,7 +1,7 @@
 // The annotation layer above the station imagery: room boundaries with their
 // names, and the selected tile.
 import { applyWorldTransform, visibleTileRange } from './projection.ts';
-import { reducedMotion, state, TILE } from './state.ts';
+import { reducedMotion, state, TILE } from '../core/state.ts';
 
 interface AreaPaths {
   fill: Path2D;

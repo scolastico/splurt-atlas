@@ -1,16 +1,23 @@
 // The tile inspector: what is on the selected tile, what may spawn there,
 // door access and controls, and the objects drawn beside the tile.
-import { groupDoorAccess } from './door-highlights.ts';
-import { $, escapeHtml, isChecked } from './dom.ts';
-import { redraw } from './frame.ts';
+import { groupDoorAccess } from '../model/door-highlights.ts';
+import { $, escapeHtml, isChecked } from '../core/dom.ts';
+import { redraw } from '../core/frame.ts';
 import { setSidebarCollapsed, showSidebarView } from './layout.ts';
-import { tileCenterX, tileCenterY } from './projection.ts';
+import { tileCenterX, tileCenterY } from '../rendering/projection.ts';
 import { clearFinding, requestTileCandidates } from './search.ts';
-import { definitionAt, networkNames, palette, state } from './state.ts';
+import { definitionAt, networkNames, palette, state } from '../core/state.ts';
 import { setDeck } from './station.ts';
-import type { Atom, Definition, DoorAccess, DoorControl, SearchRecord, TileCandidate } from './types.ts';
+import type {
+  Atom,
+  Definition,
+  DoorAccess,
+  DoorControl,
+  SearchRecord,
+  TileCandidate,
+} from '../core/types.ts';
 import { share } from './url-state.ts';
-import { viewFragment } from './view-state.ts';
+import { viewFragment } from '../model/view-state.ts';
 
 /** The finding shown with the selection, if the selection came from a search result. */
 let inspectedResult: (SearchRecord & { spawner?: string }) | null = null;

@@ -2,7 +2,7 @@
 // star planes that drift with the camera at different rates. It paints on its
 // own canvas so station frames never repaint it.
 import { spaceCanvas, spaceContext } from './canvases.ts';
-import { state } from './state.ts';
+import { state } from '../core/state.ts';
 
 const PLANE_SIZE = 1024;
 const BACKGROUND_FPS = 30;

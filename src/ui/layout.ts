@@ -1,9 +1,9 @@
 // Sidebar layout: collapsing, the three sidebar views, the drag handle that
 // resizes the sidebar (or the bottom sheet on portrait phones), and the
 // insets the map must leave for it.
-import { $, readSetting, writeSetting } from './dom.ts';
-import { redraw } from './frame.ts';
-import { reducedMotion } from './state.ts';
+import { $, readSetting, writeSetting } from '../core/dom.ts';
+import { redraw } from '../core/frame.ts';
+import { reducedMotion } from '../core/state.ts';
 
 export type SidebarView = 'explore' | 'search' | 'inspect';
 

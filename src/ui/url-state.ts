@@ -1,11 +1,17 @@
 // The shareable URL fragment: the view, selection and sidebar options are
 // written back to the address bar so any state can be linked.
-import { $, checkbox } from './dom.ts';
-import { invalidateUtilityPaths } from './infrastructure-overlay.ts';
-import { updateSpaceAnimation } from './space-background.ts';
-import { enabledNetworks, palette, state } from './state.ts';
-import type { Network } from './types.ts';
-import { decodeOptions, encodeOptions, optionBits, viewFragment, type OptionKey } from './view-state.ts';
+import { $, checkbox } from '../core/dom.ts';
+import { invalidateUtilityPaths } from '../rendering/infrastructure-overlay.ts';
+import { updateSpaceAnimation } from '../rendering/space-background.ts';
+import { enabledNetworks, palette, state } from '../core/state.ts';
+import type { Network } from '../core/types.ts';
+import {
+  decodeOptions,
+  encodeOptions,
+  optionBits,
+  viewFragment,
+  type OptionKey,
+} from '../model/view-state.ts';
 
 /** Updates to the fragment are coalesced so dragging does not rewrite history every frame. */
 const SHARE_DELAY_MS = 150;

@@ -1,10 +1,10 @@
 // The utility network toggles and the "simple utility symbols" overlay that
 // replaces cable and pipe sprites with lightweight crosses.
-import { $, isChecked } from './dom.ts';
-import { redraw } from './frame.ts';
+import { $, isChecked } from '../core/dom.ts';
+import { redraw } from '../core/frame.ts';
 import { applyWorldTransform, tileCenterX, tileCenterY } from './projection.ts';
-import { enabledNetworks, networkNames, palette, state } from './state.ts';
-import type { Network } from './types.ts';
+import { enabledNetworks, networkNames, palette, state } from '../core/state.ts';
+import type { Network } from '../core/types.ts';
 
 /** NORTH, SOUTH, EAST, WEST port bits with their unit direction. */
 const PORTS: [number, number, number][] = [

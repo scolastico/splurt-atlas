@@ -1,6 +1,6 @@
 // Pure helpers for the camera and the shareable URL fragment. They have no DOM
 // access so the unit tests can exercise them directly.
-import type { MapMeta } from './types.ts';
+import type { MapMeta } from '../core/types.ts';
 
 /** Zoom-level selector: 'overview' or the pyramid level to draw (0 = full chunks). */
 export type Detail = 'overview' | 0 | 1 | 2;

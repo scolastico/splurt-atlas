@@ -1,6 +1,6 @@
 // Door access highlighting: which doors a set of job roles can open.
 import Fuse from 'fuse.js';
-import type { Atom, DoorAccess, LevelData, MapMeta } from './types.ts';
+import type { Atom, DoorAccess, LevelData, MapMeta } from '../core/types.ts';
 
 export interface DoorTile {
   x: number;

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { indexedDB } from 'fake-indexeddb';
 import JSZip from 'jszip';
-import { AssetCache } from '../src/asset-cache.ts';
+import { AssetCache } from '../src/data/asset-cache.ts';
 globalThis.indexedDB = indexedDB;
 const preferences = new Map();
 globalThis.localStorage = {

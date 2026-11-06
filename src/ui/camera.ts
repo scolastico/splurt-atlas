@@ -1,8 +1,8 @@
 // Camera movement: fitting the station, zooming, and the pointer, wheel and
 // keyboard controls on the map canvas.
-import { mapCanvas } from './canvases.ts';
-import { $ } from './dom.ts';
-import { redraw } from './frame.ts';
+import { mapCanvas } from '../rendering/canvases.ts';
+import { $ } from '../core/dom.ts';
+import { redraw } from '../core/frame.ts';
 import { clearSelection, inspect } from './inspector.ts';
 import {
   bottomSidebarInset,
@@ -11,8 +11,8 @@ import {
   showSidebarView,
   sidebarInset,
 } from './layout.ts';
-import { screenCenterX, screenCenterY, tileAtScreen } from './projection.ts';
-import { state, TILE } from './state.ts';
+import { screenCenterX, screenCenterY, tileAtScreen } from '../rendering/projection.ts';
+import { state, TILE } from '../core/state.ts';
 import { share } from './url-state.ts';
 
 const MIN_ZOOM = 0.04;

@@ -8,8 +8,8 @@ import {
   encodeOptions,
   decodeOptions,
   optionBits,
-} from '../src/view-state.ts';
-import { createSearchIndex } from '../src/search-index.ts';
+} from '../src/model/view-state.ts';
+import { createSearchIndex } from '../src/model/search-index.ts';
 
 test('image detail changes at fixed zoom thresholds', () => {
   assert.deepEqual([0.04, 0.124, 0.125, 0.249, 0.25, 0.499, 0.5, 1, 5].map(detailForZoom), [

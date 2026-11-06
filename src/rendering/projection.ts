@@ -1,9 +1,9 @@
 // Conversions between map tiles, world pixels and the screen. World space has
 // 32 pixels per tile with y growing downwards from the top of the map, while
 // the game counts tile y upwards from the bottom.
-import { bottomSidebarInset, sidebarInset } from './layout.ts';
-import { TILE, state } from './state.ts';
-import { deckScale } from './view-state.ts';
+import { bottomSidebarInset, sidebarInset } from '../ui/layout.ts';
+import { TILE, state } from '../core/state.ts';
+import { deckScale } from '../model/view-state.ts';
 
 /** Screen position of the camera center, which avoids the area under the sidebar. */
 export function screenCenterX(): number {

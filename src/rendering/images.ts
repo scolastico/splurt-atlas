@@ -2,12 +2,12 @@
 // decodes them off the main thread and keeps them as renderer textures
 // within a memory budget.
 import { renderer } from './canvases.ts';
-import { assetCache, resolvePath } from './data.ts';
-import { $ } from './dom.ts';
-import { redraw } from './frame.ts';
+import { assetCache, resolvePath } from '../data/source.ts';
+import { $ } from '../core/dom.ts';
+import { redraw } from '../core/frame.ts';
 import type { TextureHandle } from './gl-renderer.ts';
-import { state } from './state.ts';
-import { slotCount } from '../scripts/lib/map-format.mjs';
+import { state } from '../core/state.ts';
+import { slotCount } from '../../scripts/lib/map-format.mjs';
 
 export interface ImageEntry {
   path: string;

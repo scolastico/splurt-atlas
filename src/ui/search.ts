@@ -1,13 +1,13 @@
 // The search sidebar: queries run in a worker; a result expands into its list
 // of findings (locations), which are drawn as rings on the map.
-import { $, escapeHtml } from './dom.ts';
-import { redraw } from './frame.ts';
+import { $, escapeHtml } from '../core/dom.ts';
+import { redraw } from '../core/frame.ts';
 import { inspect, receiveTileCandidates } from './inspector.ts';
 import { showSidebarView } from './layout.ts';
-import { tileCenterX, tileCenterY } from './projection.ts';
-import { definitionAt, state } from './state.ts';
+import { tileCenterX, tileCenterY } from '../rendering/projection.ts';
+import { definitionAt, state } from '../core/state.ts';
 import { setDeck } from './station.ts';
-import type { MapMeta, SearchHit, SearchRecord, TileCandidate } from './types.ts';
+import type { MapMeta, SearchHit, SearchRecord, TileCandidate } from '../core/types.ts';
 import { share } from './url-state.ts';
 
 const FINDINGS_PER_PAGE = 30;
@@ -225,7 +225,7 @@ export function startSearchWorker(
   const restoreReady = new Promise<void>((resolve) => (resolveRestore = resolve));
   if (!restoreTarget) resolveRestore();
   worker?.terminate();
-  worker = new Worker(new URL('./search.worker.ts', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('../workers/search.worker.ts', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data }: MessageEvent<WorkerMessage>) => {
     if (generation !== state.generation) return;
     switch (data.type) {

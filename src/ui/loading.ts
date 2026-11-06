@@ -1,5 +1,5 @@
 // The loading overlay shown over the map while a station loads or fails.
-import { $ } from './dom.ts';
+import { $ } from '../core/dom.ts';
 
 /** Shows a message with an optional 0–1 progress value, or hides the overlay. */
 export function setLoading(message: string, show = true, progress: number | null = null): void {

@@ -2,8 +2,8 @@
 // which prefers a stored copy; `warm()` downloads whole map ZIPs and extracts
 // them so a station can be reopened without the network.
 import type { ExtractedAsset } from './archive-extract.ts';
-import type { ArchiveWorkerMessage } from './archive-worker.ts';
-import type { Manifest, ManifestMap } from './types.ts';
+import type { ArchiveWorkerMessage } from '../workers/archive-worker.ts';
+import type { Manifest, ManifestMap } from '../core/types.ts';
 
 const DATABASE = 'splurt-atlas-assets-v1';
 const DATABASE_VERSION = 2;
@@ -417,7 +417,7 @@ export class AssetCache {
       return extractArchive(blob, onBatch, () => signal.aborted, priorities);
     }
     return new Promise((resolve, reject) => {
-      const worker = new Worker(new URL('./archive-worker.ts', import.meta.url), { type: 'module' });
+      const worker = new Worker(new URL('../workers/archive-worker.ts', import.meta.url), { type: 'module' });
       const finish = (error?: Error) => {
         worker.terminate();
         signal.removeEventListener('abort', abort);

@@ -1,22 +1,22 @@
 // Entry point: wires the sidebar, map controls and rendering together, then
 // loads the catalog and the station named in the link.
 import './style.css';
-import { initCameraControls } from './camera.ts';
-import { assetCache, catalogBase, fetchManifest, setDataBase } from './data.ts';
-import { initDoorRoles } from './door-roles.ts';
-import { $, checkbox } from './dom.ts';
-import { redraw } from './frame.ts';
-import { initNetworkControls } from './infrastructure-overlay.ts';
-import { clearInspectedResult, initInspector, paintInspector } from './inspector.ts';
-import { initLayout, showSidebarView } from './layout.ts';
-import { showLoadingError } from './loading.ts';
-import { initRender } from './render.ts';
-import { initSearch } from './search.ts';
-import { updateSpaceAnimation } from './space-background.ts';
-import { reducedMotion, state } from './state.ts';
-import { loadStation, showMapPicker } from './station.ts';
-import { chooseStorage, initStorageSettings, warmStorage } from './storage-settings.ts';
-import { currentHashParams, initOptionSharing, restoreOptions } from './url-state.ts';
+import { initCameraControls } from './ui/camera.ts';
+import { assetCache, catalogBase, fetchManifest, setDataBase } from './data/source.ts';
+import { initDoorRoles } from './ui/door-roles.ts';
+import { $, checkbox } from './core/dom.ts';
+import { redraw } from './core/frame.ts';
+import { initNetworkControls } from './rendering/infrastructure-overlay.ts';
+import { clearInspectedResult, initInspector, paintInspector } from './ui/inspector.ts';
+import { initLayout, showSidebarView } from './ui/layout.ts';
+import { showLoadingError } from './ui/loading.ts';
+import { initRender } from './rendering/render.ts';
+import { initSearch } from './ui/search.ts';
+import { updateSpaceAnimation } from './rendering/space-background.ts';
+import { reducedMotion, state } from './core/state.ts';
+import { loadStation, showMapPicker } from './ui/station.ts';
+import { chooseStorage, initStorageSettings, warmStorage } from './ui/storage-settings.ts';
+import { currentHashParams, initOptionSharing, restoreOptions } from './ui/url-state.ts';
 
 function initSourceLink(): void {
   const url = import.meta.env.VITE_ATLAS_SOURCE_URL;

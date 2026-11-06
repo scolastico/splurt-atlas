@@ -3,8 +3,8 @@
 // ladder markers. It animates on its own transparent canvas so the station
 // imagery stays idle.
 import { highlightCanvas, highlightContext } from './canvases.ts';
-import { getDoorMarkers } from './door-roles.ts';
-import { isChecked } from './dom.ts';
+import { getDoorMarkers } from '../ui/door-roles.ts';
+import { isChecked } from '../core/dom.ts';
 import {
   applyWorldTransform,
   tileCenterX,
@@ -13,7 +13,7 @@ import {
   worldToScreenX,
   worldToScreenY,
 } from './projection.ts';
-import { definitionAt, reducedMotion, state, TILE } from './state.ts';
+import { definitionAt, reducedMotion, state, TILE } from '../core/state.ts';
 
 const OVERLAY_FPS = 30;
 const PULSE_PERIOD_MS = 1800;

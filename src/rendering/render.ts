@@ -1,17 +1,17 @@
 // The frame: station decks on the WebGL canvas, then the annotation layer.
 import { drawAnnotations, selectionPulsing } from './annotations.ts';
 import { annotationCanvas, annotationContext, highlightCanvas, mapCanvas, renderer } from './canvases.ts';
-import { assetCache } from './data.ts';
+import { assetCache } from '../data/source.ts';
 import { drawDeck, trackCameraMotion } from './deck-tiles.ts';
-import { $, isChecked } from './dom.ts';
-import { paintNow, redraw, setFramePainter } from './frame.ts';
+import { $, isChecked } from '../core/dom.ts';
+import { paintNow, redraw, setFramePainter } from '../core/frame.ts';
 import { updateHighlightOverlay } from './highlight-overlay.ts';
 import { beginFrame, trimImages } from './images.ts';
 import { drawInfrastructure } from './infrastructure-overlay.ts';
-import { isSidebarAnimating } from './layout.ts';
+import { isSidebarAnimating } from '../ui/layout.ts';
 import { resizeBackground, updateSpaceAnimation } from './space-background.ts';
-import { state, TILE } from './state.ts';
-import { detailForZoom } from './view-state.ts';
+import { state, TILE } from '../core/state.ts';
+import { detailForZoom } from '../model/view-state.ts';
 
 /** Shade of a deck `depth` levels below the viewed one. */
 function deckShade(depth: number): number {

@@ -5,7 +5,7 @@ import {
   doorMarkersForRoles,
   roleSuggestions,
   groupDoorAccess,
-} from '../src/door-highlights.ts';
+} from '../src/model/door-highlights.ts';
 test('door highlights use starting roles, public access and remote restrictions, preserving each deck', () => {
   const definition = (access) => ({ atoms: access.map((doorAccess) => ({ doorAccess })) });
   const map = {

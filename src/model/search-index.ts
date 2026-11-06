@@ -1,7 +1,7 @@
 // Fuzzy search over rooms, placed items and possible loot, grouped per type.
 // Runs inside the search worker.
 import Fuse from 'fuse.js';
-import type { Room, SearchHit, SearchItem, SearchRecord, TileCandidate } from './types.ts';
+import type { Room, SearchHit, SearchItem, SearchRecord, TileCandidate } from '../core/types.ts';
 
 export interface SearchFilters {
   placed: boolean;

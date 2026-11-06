@@ -1,15 +1,15 @@
 // Loading a station: decoding its metadata and decks, restoring the view from
 // the link, and the station picker shown when no station is selected.
-import { resetAnnotationCaches } from './annotations.ts';
-import { mapCanvas } from './canvases.ts';
+import { resetAnnotationCaches } from '../rendering/annotations.ts';
+import { mapCanvas } from '../rendering/canvases.ts';
 import { fit } from './camera.ts';
-import { assetCache, fetchBytes, fetchJson, resolvePath } from './data.ts';
-import { prepareView } from './deck-tiles.ts';
+import { assetCache, fetchBytes, fetchJson, resolvePath } from '../data/source.ts';
+import { prepareView } from '../rendering/deck-tiles.ts';
 import { loadDoorRoles } from './door-roles.ts';
-import { $, escapeHtml, isChecked } from './dom.ts';
-import { redraw } from './frame.ts';
-import { clearImages, setWarmImages } from './images.ts';
-import { invalidateUtilityPaths } from './infrastructure-overlay.ts';
+import { $, escapeHtml, isChecked } from '../core/dom.ts';
+import { redraw } from '../core/frame.ts';
+import { clearImages, setWarmImages } from '../rendering/images.ts';
+import { invalidateUtilityPaths } from '../rendering/infrastructure-overlay.ts';
 import { clearSelection, inspect } from './inspector.ts';
 import { showSidebarView } from './layout.ts';
 import { clearLoadingError, setLoading, showLoadingError } from './loading.ts';
@@ -20,12 +20,12 @@ import {
   startSearchWorker,
   type RestoreTarget,
 } from './search.ts';
-import { state, TILE, type DeckLevel } from './state.ts';
+import { state, TILE, type DeckLevel } from '../core/state.ts';
 import { updateStorageSizes, warmStorage } from './storage-settings.ts';
-import type { LevelData, MapMeta } from './types.ts';
+import type { LevelData, MapMeta } from '../core/types.ts';
 import { currentHashParams, restoreOptions, share, shareOptionsOnly } from './url-state.ts';
-import { selectedTile } from './view-state.ts';
-import { decodeLevel, decodeMap } from '../scripts/lib/map-format.mjs';
+import { selectedTile } from '../model/view-state.ts';
+import { decodeLevel, decodeMap } from '../../scripts/lib/map-format.mjs';
 
 let loadAbort: AbortController | null = null;
 

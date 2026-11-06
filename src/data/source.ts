@@ -2,8 +2,8 @@
 // cache and JSON loading. The cache reports its progress into the sidebar's
 // "Offline storage" section and the floating activity badge.
 import { AssetCache, type CacheProgress } from './asset-cache.ts';
-import { $ } from './dom.ts';
-import type { Manifest } from './types.ts';
+import { $ } from '../core/dom.ts';
+import type { Manifest } from '../core/types.ts';
 
 /** Location of data/manifest.json. */
 export const catalogBase = new URL('./data/', document.baseURI);

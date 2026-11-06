@@ -2,9 +2,9 @@
 // raw search.json bytes; decoding them here keeps the large object graph out
 // of the main thread entirely.
 /// <reference lib="webworker" />
-import { createSearchIndex, type SearchFilters, type SearchIndex } from './search-index.ts';
-import { decodeSearch } from '../scripts/lib/map-format.mjs';
-import type { Room, SearchItem } from './types.ts';
+import { createSearchIndex, type SearchFilters, type SearchIndex } from '../model/search-index.ts';
+import { decodeSearch } from '../../scripts/lib/map-format.mjs';
+import type { Room, SearchItem } from '../core/types.ts';
 
 export type SearchWorkerRequest =
   | {

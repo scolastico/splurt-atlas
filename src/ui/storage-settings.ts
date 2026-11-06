@@ -1,8 +1,8 @@
 // The "Offline storage" sidebar section and the first-visit storage dialog.
-import { assetCache, getDataBase } from './data.ts';
-import { $ } from './dom.ts';
-import { state } from './state.ts';
-import type { ManifestMap } from './types.ts';
+import { assetCache, getDataBase } from '../data/source.ts';
+import { $ } from '../core/dom.ts';
+import { state } from '../core/state.ts';
+import type { ManifestMap } from '../core/types.ts';
 
 function megabytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`;

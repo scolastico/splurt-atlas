@@ -2,7 +2,7 @@
 // background, the station imagery (WebGL with a Canvas 2D fallback), the
 // annotation layer (room boundaries, utility symbols, selection) and the
 // animated highlight overlay (search findings, door markers, stairs).
-import { $ } from './dom.ts';
+import { $ } from '../core/dom.ts';
 import { create2dRenderer, createGlRenderer } from './gl-renderer.ts';
 
 export const spaceCanvas = $<HTMLCanvasElement>('space');
