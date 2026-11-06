@@ -213,6 +213,8 @@ function deckChannels(z: number): string[] {
     }
   }
   channels.push('foreground');
+  // Mapper-only helper markers are drawn above everything else of the viewed deck.
+  if (z === state.z && isChecked('mapping-helpers')) channels.push('helpers');
   return channels;
 }
 

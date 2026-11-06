@@ -51,6 +51,7 @@ export const optionBits = {
   possible: 13,
   'runtime-terrain': 14,
   fluid: 15,
+  'mapping-helpers': 16,
 } as const;
 
 export type OptionKey = keyof typeof optionBits;

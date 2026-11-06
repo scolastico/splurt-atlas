@@ -18,9 +18,10 @@ import { share } from './url-state.ts';
 
 const MIN_ZOOM = 0.04;
 const MAX_ZOOM = 5;
-/** Keyboard panning: top speed in screen pixels per second and the time to reach it. */
+/** Keyboard panning: cruising speed in screen pixels per second and the time to reach it; Shift doubles it. */
 const KEY_PAN_SPEED = 900;
 const KEY_PAN_RAMP_MS = 260;
+const KEY_PAN_SHIFT_FACTOR = 2;
 
 /** Centers the station's non-space area and zooms to fit it beside the sidebar. */
 export function fit(): void {
@@ -184,8 +185,10 @@ function onKeyDown(event: KeyboardEvent): void {
     else setSidebarCollapsed(true);
   }
   const panKey = PAN_KEYS[event.key.length === 1 ? event.key.toLowerCase() : event.key];
+  if (event.key === 'Shift') shiftHeld = true;
   if (panKey) {
     event.preventDefault();
+    shiftHeld = event.shiftKey;
     if (!event.repeat) pressPanKey(event.key);
   }
 }
@@ -194,8 +197,10 @@ function onKeyDown(event: KeyboardEvent): void {
 // the speed ramps up briefly after the first press and diagonal movement is
 // not faster than straight movement.
 const heldPanKeys = new Set<string>();
+let shiftHeld = false;
 let panFrame = 0;
-let panStarted = 0;
+/** Current speed in screen pixels per second; it ramps toward the wanted speed. */
+let panSpeed = 0;
 let lastPanTime = 0;
 
 function normalizePanKey(key: string): string {
@@ -205,7 +210,8 @@ function normalizePanKey(key: string): string {
 function pressPanKey(key: string): void {
   heldPanKeys.add(normalizePanKey(key));
   if (panFrame) return;
-  panStarted = lastPanTime = performance.now();
+  panSpeed = 0;
+  lastPanTime = performance.now();
   panFrame = requestAnimationFrame(stepPan);
 }
 
@@ -223,17 +229,25 @@ function stepPan(now: number): void {
     dy += PAN_KEYS[key][1];
   }
   const length = Math.hypot(dx, dy);
-  const ramp = Math.min(1, (now - panStarted) / KEY_PAN_RAMP_MS);
-  const speed = KEY_PAN_SPEED * ramp * ramp;
   const seconds = Math.min(0.1, (now - lastPanTime) / 1000);
   lastPanTime = now;
+  // Accelerate or brake toward the wanted speed, so pressing or releasing
+  // Shift mid-movement glides between the two speeds instead of jumping.
+  const wanted = KEY_PAN_SPEED * (shiftHeld ? KEY_PAN_SHIFT_FACTOR : 1);
+  const acceleration = (KEY_PAN_SPEED / (KEY_PAN_RAMP_MS / 1000)) * seconds;
+  panSpeed =
+    panSpeed < wanted ? Math.min(wanted, panSpeed + acceleration) : Math.max(wanted, panSpeed - acceleration);
   if (length)
-    panBy(((dx / length) * speed * seconds) / state.zoom, ((dy / length) * speed * seconds) / state.zoom);
+    panBy(
+      ((dx / length) * panSpeed * seconds) / state.zoom,
+      ((dy / length) * panSpeed * seconds) / state.zoom,
+    );
   panFrame = requestAnimationFrame(stepPan);
 }
 
 function stopPanning(): void {
   heldPanKeys.clear();
+  shiftHeld = false;
 }
 
 /** Mouse back and forward buttons step through the in-app history instead of the browser's. */
@@ -256,6 +270,9 @@ export function initCameraControls(): void {
   $('zoom-out').onclick = () => zoomBy(1 / 1.5);
   $('fit').onclick = fit;
   document.onkeydown = onKeyDown;
-  document.addEventListener('keyup', (event) => releasePanKey(event.key));
+  document.addEventListener('keyup', (event) => {
+    if (event.key === 'Shift') shiftHeld = false;
+    releasePanKey(event.key);
+  });
   window.addEventListener('blur', stopPanning);
 }

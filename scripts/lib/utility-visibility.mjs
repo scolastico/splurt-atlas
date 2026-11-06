@@ -26,7 +26,11 @@ export function renderChannel(atom, atoms, db) {
     ? channel + '-surface'
     : channel || 'base';
 }
+const MAPPING_HELPER = /^\/obj\/effect\/mapping_helpers(?:\/|$)/;
+
 export function bakedChannel(atom, atoms, db) {
+  // Mapping helpers only guide mappers (mail sorting, access, lighting...); they never exist in a round.
+  if(MAPPING_HELPER.test(atom.path))return 'helpers';
   // Atmospherics components (vents, scrubbers, pumps...) stay visible under intact floors; only their pipe caps hide.
   if (
     classify(atom.path) === 'pipes' &&

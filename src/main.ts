@@ -42,6 +42,7 @@ function initDisplayToggles(): void {
       redraw();
     }
   };
+  checkbox('mapping-helpers').onchange = redraw;
   checkbox('motion').checked = state.motion = !reducedMotion.matches;
   reducedMotion.addEventListener('change', (event) => {
     state.motion = checkbox('motion').checked = !event.matches;

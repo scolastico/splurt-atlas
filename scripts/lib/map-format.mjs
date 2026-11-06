@@ -16,6 +16,8 @@ export const CHANNELS = [
   'power-surface',
   'fluid-surface',
   'natural',
+  // Mapper-only markers such as mail sorting or area helpers; hidden by default.
+  'helpers',
 ];
 export const UTILITIES = ['disposal', 'pipes', 'power', 'fluid', 'transit'];
 // Overview strips: terrain channels in overview.webp, everything else in overview-utilities.webp.
