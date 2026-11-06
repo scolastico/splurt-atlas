@@ -1,5 +1,7 @@
 # S.P.L.U.R.T. Station Atlas
 
+**Live map: [splurt-atlas.scolasti.co](https://splurt-atlas.scolasti.co)**
+
 A static, zoomable map of [S.P.L.U.R.T.](https://github.com/SPLURT-Station/S.P.L.U.R.T-tg) stations. Node.js scripts acquire a pinned source checkout, parse BYOND DMM/TGM maps and DM declarations, decode DMI sprite sheets, and bake browser-ready WebP tiles. The deployed app needs no server, database, BYOND installation or API key.
 
 ## Run locally
@@ -89,6 +91,8 @@ The project repository is [scolastico/splurt-atlas](https://github.com/scolastic
 ## Cloudflare R2 mirror
 
 The same non-PR build is also mirrored to R2 in a separate CI job. Configure Actions secrets `R2_ACCESS_KEY_ID` (access key ID), `R2_ACCESS_KEY` (secret access key), and `R2_ENDPOINT` (HTTPS S3 API endpoint). Set repository variable `R2_BUCKET` to the destination bucket, and optionally `R2_PREFIX` to a directory inside it. An endpoint containing `/bucket/prefix` can supply the destination instead; explicit variables must agree with the endpoint bucket. The bucket or prefix is dedicated to this site: files absent from the new build are removed there.
+
+This repository deploys to the root of bucket `splurt-atlas`, served at [splurt-atlas.scolasti.co](https://splurt-atlas.scolasti.co).
 
 Deployment uses rclone's S3-compatible Cloudflare backend and checksums to avoid re-uploading identical files even when artifact timestamps change. It uploads changed files, removes obsolete objects after successful transfers, and publishes `data/manifest.json` and `index.html` last. An incomplete local build or an unspecified bucket is rejected before any sync. Credentials are provided through environment variables without writing a credentials file. Mutable URLs receive revalidation headers; the viewer's IndexedDB cache handles map-resource reuse. The R2 bucket's public domain or Worker routing is configured separately in Cloudflare, including serving `index.html` for the site root. CI does not change bucket access settings or domain routing.
 
