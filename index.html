@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#101822"><meta name="description" content="Explore S.P.L.U.R.T. stations, decks, rooms, infrastructure and mapped item spawns."><title>S.P.L.U.R.T. / Station Atlas</title>  <script type="module" crossorigin src="./assets/index-_flbyXgF.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-Do8yrzz8.css">
+</head>
+<body><noscript><div style="position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:24px;background:#0b1420;color:#e3eef7;font:1rem/1.5 system-ui,sans-serif;text-align:center"><div style="max-width:34rem"><strong style="display:block;font-size:1.4rem;margin-bottom:.5rem">The Station Atlas needs JavaScript</strong>This map viewer renders the stations in your browser. Enable JavaScript for this site and reload the page.</div></div></noscript><div id="app">
+  <aside id="sidebar" aria-label="Station explorer">
+    <div class="sidebar-heading"><a class="brand" href="./">S.P.L.U.R.T.<small>STATION ATLAS</small></a></div>
+    <div class="station-controls">
+      <div class="eyebrow">EXPLORER <span class="status-dot"></span><span id="source-status">INITIALIZING</span></div>
+      <h1 id="map-title" class="sr-only">Charting the station</h1>
+      <label class="sr-only" for="station">Station</label><select id="station" aria-label="Station"></select>
+      <p id="map-subtitle">Preparing your orbital perspective</p><div id="station-meta"></div>
+    </div>
+    <nav class="sidebar-tabs" aria-label="Sidebar views"><button id="explore-tab" aria-pressed="true" aria-controls="explore-panel">Map & layers</button><button id="search-tab" aria-pressed="false" aria-controls="search-panel">Search</button><button id="inspect-tab" aria-pressed="false" aria-controls="inspector" disabled>Selected tile</button></nav>
+    <div class="sidebar-scroll">
+      <div id="search-panel" hidden>
+        <div class="section-title"><h2>Find your way</h2></div>
+        <div class="search-box"><span>⌕</span><input id="search" type="search" placeholder="Room, item, or type path…" aria-label="Search rooms and item spawns" autocomplete="off" disabled><button id="reset-search" type="button" aria-label="Reset search" title="Reset search" hidden>&#215;</button></div>
+        <div class="search-filters"><label><input type="checkbox" id="placed" checked> Placed</label><label><input type="checkbox" id="possible" checked> Possible</label></div>
+        <div id="search-status" role="status"></div><div id="results"></div>
+      </div>
+      <div id="explore-panel">
+        <div class="section-title"><h2>Infrastructure</h2></div><div id="network-controls"></div><p class="helper-text">Exposed utilities stay visible. Enable a network to reveal its hidden components beneath floors.</p>
+        <div class="section-title"><h2>Map display</h2></div>
+        <label class="toggle-row"><span>Room boundaries</span><input type="checkbox" id="regions"></label>
+        <label class="toggle-row"><span>Look through decks</span><input type="checkbox" id="cutaway" checked></label>
+        <label class="toggle-row"><span>Animated parallax</span><input type="checkbox" id="motion" checked></label>
+        <label class="toggle-row"><span>Color separate power networks</span><input type="checkbox" id="power-networks"></label>
+        <label class="toggle-row"><span>Simple utility symbols</span><input type="checkbox" id="simple-utilities"></label>
+        <label class="toggle-row"><span>Highlight stairs & ladders</span><input type="checkbox" id="connections"></label>
+        <label class="toggle-row"><span>Show where stairs &amp; ladders lead</span><input type="checkbox" id="connection-labels" checked></label>
+        <label class="toggle-row"><span>Replace runtime-generated turfs</span><input type="checkbox" id="runtime-terrain" checked></label>
+        <label class="toggle-row"><span>Mapping helpers</span><input type="checkbox" id="mapping-helpers"></label>
+        <p id="network-summary" class="helper-text"></p>
+        <div class="section-title"><h2>Door access</h2></div><label class="storage-label" for="door-role-input">Highlight doors for roles</label><div class="role-input"><div id="door-role-tags"></div><input id="door-role-input" type="text" role="combobox" aria-autocomplete="list" aria-controls="door-role-suggestions" aria-expanded="false" autocomplete="off" placeholder="Add a role…" disabled><button id="clear-door-roles" type="button" aria-label="Clear selected roles" hidden>×</button><div id="door-role-suggestions" role="listbox" aria-label="Role suggestions" hidden></div></div><p class="helper-text"><span class="door-allowed">Green: everyone can enter</span> · <span class="door-partial">Yellow: some roles, or expanded access</span> · <span class="door-denied">Red: none can enter</span>. On this deck only. Remote doors are red; unknown access stays unmarked.</p>
+        <div class="section-title"><h2>Offline storage</h2></div>
+        <label class="storage-label" for="storage-mode">Save maps on this device</label><select id="storage-mode"><option value="all">All maps (recommended)</option><option value="current">Current map only</option><option value="none">No offline storage</option></select><p id="storage-size" class="helper-text"></p>
+        <p id="cache-status" class="helper-text" role="status">Preparing offline maps…</p><a id="download-map" class="map-download" hidden>Download map ZIP</a>
+        <div class="sidebar-bottom"><span class="tiny-label">STATIC SOURCE SNAPSHOT</span><a id="commit-link" target="_blank" rel="noreferrer"></a><p>Mapped positions, before the round begins.<br>Random spawns are candidates, not guarantees.</p><a id="source-link" target="_blank" rel="noreferrer">Upstream source ↗</a><a href="./data/UPSTREAM-README.md" target="_blank">Asset credits & licenses ↗</a><a id="atlas-source" hidden target="_blank" rel="noreferrer">Atlas source · AGPL-3.0+ ↗</a><p>Assets: S.P.L.U.R.T. & contributors.<br>CC BY-SA / individual notices.</p></div>
+      </div>
+      <div id="selection-panel" hidden><label class="toggle-row detailed-toggle"><span>Detailed view</span><input type="checkbox" id="detailed-view"></label><section id="search-findings" aria-label="Search finding locations" hidden></section><section id="inspector" aria-label="Selected tile inspector"></section></div>
+    </div>
+    <div class="sidebar-status"><div><span class="status-dot"></span><span id="coords">DRAG TO EXPLORE</span></div><span id="scale"></span><p>Drag to pan · Scroll to zoom · Click to inspect</p></div>
+    <div id="sidebar-resize" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" tabindex="0"></div>
+  </aside>
+  <button id="sidebar-toggle" aria-label="Collapse sidebar" aria-expanded="true" aria-controls="sidebar" title="Collapse sidebar">‹</button>
+  <main id="viewport"><canvas id="space" aria-hidden="true"></canvas><canvas id="map" aria-label="Interactive station map. Drag to pan, scroll to zoom. Use arrow keys to pan and plus or minus to zoom." tabindex="0"></canvas><canvas id="annotations" aria-hidden="true"></canvas><canvas id="connection-overlay" aria-hidden="true"></canvas><div id="loading" role="status"><span class="spinner" aria-hidden="true"></span><strong id="loading-message">Reading station archive…</strong><progress id="loading-progress"></progress></div><section id="map-picker" hidden><h1>Choose your station</h1><p>Explore every mapped deck, room and connection.</p><div id="map-cards"></div></section><div class="floating-decks"><span class="tiny-label">DECK</span><div id="decks" aria-label="Decks"></div></div><div class="map-tools"><div id="cache-activity" hidden role="status"><span class="spinner" aria-hidden="true"></span><strong>Preparing offline cache</strong><small>The map may be slower while saving. Unready chunks may look blurry or pixelated.</small></div><button id="history-back" aria-label="Back to the previous selection" title="Back (Alt+←, mouse back button)" disabled>‹</button><button id="history-forward" aria-label="Forward to the next selection" title="Forward (Alt+→, mouse forward button)" disabled>›</button><button id="zoom-in" aria-label="Zoom in">+</button><button id="zoom-out" aria-label="Zoom out">−</button><button id="fit" aria-label="Fit station" title="Fit station (F)">⌖</button></div></main>
+</div><dialog id="storage-dialog" aria-labelledby="storage-title"><h2 id="storage-title">Keep your maps ready</h2><p>Download the maps once to explore faster and use less internet when you return. We recommend saving all maps.</p><button type="button" data-storage-mode="all" autofocus><strong>Download all maps <span>Recommended</span></strong><small id="storage-all-size"></small><small>Every station is ready, including maps you have not opened.</small></button><button type="button" data-storage-mode="current"><strong>Download the current map only</strong><small id="storage-current-size"></small><small>Switching stations replaces the saved map to keep disk use low.</small></button><button type="button" data-storage-mode="none"><strong>No offline storage</strong><small>0 MB of offline map storage</small><small>Load map data from the internet each time.</small></button><p class="helper-text">Download size is the ZIP transfer; extracted size is the final saved map data, plus a small browser storage overhead. ZIPs are deleted after extraction; allow temporary space for one archive. Ordinary browser caching may still use space. You can change this choice in the sidebar. This preference stays on this device and is never included in shared links.</p></dialog></body></html>
