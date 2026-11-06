@@ -184,6 +184,13 @@ function dropImage(path: string, entry: ImageEntry): void {
   }
 }
 
+/** Counts for the development tools. */
+export function imageStats(): { ready: number; pending: number; failed: number; bytes: number } {
+  let ready = 0;
+  for (const entry of images.values()) if (entry.ready) ready++;
+  return { ready, pending: images.size - ready, failed: failures.size, bytes: imageBytes };
+}
+
 /** Releases every texture, for example when another station loads. */
 export function clearImages(): void {
   for (const [path, entry] of images) dropImage(path, entry);

@@ -1,6 +1,7 @@
 // Entry point: wires the sidebar, map controls and rendering together, then
 // loads the catalog and the station named in the link.
 import './style.css';
+import { installDebugHook } from './core/debug.ts';
 import { initCameraControls } from './ui/camera.ts';
 import { assetCache, catalogBase, fetchManifest, setDataBase } from './data/source.ts';
 import { initDoorRoles } from './ui/door-roles.ts';
@@ -124,4 +125,5 @@ initOptionSharing();
 initDisplayToggles();
 initStationSelection();
 restoreOptions(currentHashParams());
+if (import.meta.env.DEV) installDebugHook();
 void boot();

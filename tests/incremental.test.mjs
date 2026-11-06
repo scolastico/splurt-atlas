@@ -170,7 +170,7 @@ test('incremental exporter reuses unchanged maps and invalidates map, sprite, in
     report = run('--incremental', '--full');
     assert.deepEqual(report.rebuilt, ['one', 'two']);
     const generate = async () => {
-      const controller = localGenerator(workspace);
+      const controller = localGenerator(workspace, { mode: 'auto' });
       controller.debounce = 0;
       await controller.tick();
       await controller.active?.promise;
@@ -239,7 +239,7 @@ test('incremental exporter reuses unchanged maps and invalidates map, sprite, in
       readFileSync(path.join(workspace, 'scripts/export.mjs'), 'utf8') +
         '\nawait new Promise(resolve=>setTimeout(resolve,1500));\n',
     );
-    const cancelled = localGenerator(workspace);
+    const cancelled = localGenerator(workspace, { mode: 'auto' });
     cancelled.debounce = 0;
     await cancelled.tick();
     let checkpointReady = false;

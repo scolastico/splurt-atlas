@@ -141,3 +141,91 @@ test('development converts a small default station subset unless ATLAS_DEV_MAPS 
   ]);
   assert.throws(() => devMaps({ ATLAS_DEV_MAPS: '../etc' }), /Invalid map ID/);
 });
+test('manual mode reports stale inputs, regenerates on request in the background and keeps results', async () => {
+  let key = 'a',
+    dataset = true,
+    runs = 0,
+    finish;
+  const published = [];
+  const controller = new GenerationController({
+    mode: 'manual',
+    inputs: async () => ({ key }),
+    current: async (input) => published.includes(input.key),
+    hasDataset: async () => dataset,
+    describe: (input) => [{ kind: 'file', detail: `inputs are now ${input.key}` }],
+    debounce: 0,
+    run: (input, signal, report, options) =>
+      new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')));
+        runs++;
+        finish = () => resolve(async () => published.push(`${input.key}${options.full ? '!' : ''}`));
+      }),
+  });
+  // Out-of-date data with a dataset present: nothing runs, the change is described.
+  await controller.tick();
+  assert.equal(runs, 0);
+  assert.equal(controller.status, null);
+  assert.deepEqual(controller.stale.changes, [{ kind: 'file', detail: 'inputs are now a' }]);
+  // A request starts a background job that keeps serving (status stays null).
+  assert.equal(await controller.request(), true);
+  assert.equal(runs, 1);
+  assert.equal(controller.status, null);
+  assert.equal(controller.job.phase, 'running');
+  assert.equal(await controller.request(), false, 'no second job while one runs');
+  // Inputs changing during the run neither cancel it nor discard its result.
+  key = 'b';
+  await controller.tick();
+  finish();
+  await controller.active.promise;
+  assert.deepEqual(published, ['a']);
+  assert.equal(controller.job.phase, 'published');
+  await controller.tick();
+  assert.deepEqual(controller.stale.changes, [{ kind: 'file', detail: 'inputs are now b' }]);
+  // Full rebuilds pass the flag through; cancelling aborts the active job.
+  await controller.request({ full: true });
+  assert.equal(controller.job.full, true);
+  assert.equal(controller.cancel(), true);
+  await controller.active?.promise;
+  assert.equal(controller.job.phase, 'cancelled');
+  assert.deepEqual(published, ['a']);
+  // Without any dataset the controller still generates by itself (cold start).
+  dataset = false;
+  published.length = 0;
+  await controller.tick();
+  assert.equal(runs, 3);
+  assert.equal(controller.status.phase, 'preparing');
+  finish();
+  await controller.active.promise;
+  assert.deepEqual(published, ['b']);
+  assert.equal(controller.status, null);
+  await controller.close();
+});
+
+test('describeChanges lists upstream, map selection and generator file differences', async () => {
+  const { describeChanges } = await import('../scripts/dev/dev-generation.mjs');
+  const stamp = {
+    commit: 'a'.repeat(40),
+    maps: ['boxstation'],
+    hashes: { 'scripts/lib/dm.mjs': '1', 'scripts/lib/old.mjs': '2' },
+  };
+  const input = {
+    commit: 'b'.repeat(40),
+    maps: null,
+    hashes: { 'scripts/lib/dm.mjs': '3', 'scripts/lib/new.mjs': '4' },
+  };
+  assert.deepEqual(
+    describeChanges(stamp, input).map((change) => change.detail),
+    [
+      `Upstream checkout moved from ${'a'.repeat(12)} to ${'b'.repeat(12)}.`,
+      'Map selection changed from boxstation to all stations.',
+      'scripts/lib/dm.mjs changed.',
+      'scripts/lib/new.mjs was added.',
+      'scripts/lib/old.mjs was removed.',
+    ],
+  );
+  assert.deepEqual(
+    describeChanges(stamp, { ...input, commit: stamp.commit, maps: ['boxstation'], hashes: stamp.hashes }),
+    [],
+  );
+  assert.equal(describeChanges(null, input)[0].kind, 'stamp');
+});

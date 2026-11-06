@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createServer } from 'vite';
@@ -147,6 +147,71 @@ test('a missing known asset triggers repair while an unknown URL remains a plain
     assert.equal((await missing.json()).phase, 'preparing');
     assert.equal(repairs, 1);
     assert.match(await (await fetch(url)).text(), /Preparing Station Atlas/);
+  } finally {
+    await server?.close();
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+test('the dev tools API starts and cancels background jobs and saves the map selection', async () => {
+  const f = await fixture();
+  let server;
+  const calls = [];
+  const generator = {
+    mode: 'manual',
+    active: null,
+    status: null,
+    stale: { key: 'k', since: 1, changes: [{ kind: 'file', detail: 'scripts/lib/dm.mjs changed.' }] },
+    job: null,
+    log: [],
+    tick: async () => {},
+    invalidate: () => calls.push('invalidate'),
+    request: async (options) => {
+      calls.push(['request', options]);
+      return true;
+    },
+    cancel: () => {
+      calls.push('cancel');
+      return false;
+    },
+  };
+  try {
+    server = await createServer({
+      root: f.root,
+      configFile: false,
+      publicDir: false,
+      plugins: [devAssets({ generationFactory: () => generator })],
+      server: { host: '127.0.0.1', port: 0, watch: null },
+      optimizeDeps: { noDiscovery: true, include: [] },
+      logLevel: 'silent',
+    });
+    await server.listen();
+    const url = `http://127.0.0.1:${server.httpServer.address().port}`;
+    const status = await until(url, 'ready');
+    assert.equal(status.serving, true);
+    assert.deepEqual(
+      status.generation.stale.changes.map((change) => change.detail),
+      ['scripts/lib/dm.mjs changed.'],
+    );
+    assert.equal(status.dataset.maps[0].id, 'station');
+    assert.match(await (await fetch(url)).text(), /__atlas_dev\/devtools\.js/);
+    assert.match(await (await fetch(url + '/__atlas_dev/devtools.js')).text(), /Atlas dev tools/);
+    const post = (route, body) =>
+      fetch(url + route, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    assert.equal((await post('/__atlas_dev/generate', { full: true })).status, 202);
+    assert.equal((await post('/__atlas_dev/cancel', {})).status, 200);
+    assert.deepEqual(calls, [['request', { full: true }], 'cancel']);
+    // Map selections are validated against the stations of the checkout, which this fixture lacks.
+    assert.equal((await post('/__atlas_dev/maps', { maps: ['unknown'] })).status, 400);
+    assert.equal((await post('/__atlas_dev/maps', { maps: null })).status, 200);
+    assert.deepEqual(JSON.parse(await readFile(path.join(f.root, '.cache/dev-settings.json'), 'utf8')), {
+      maps: null,
+    });
+    assert.equal((await fetch(url + '/__atlas_dev/unknown')).status, 404);
+    assert.equal((await fetch(url + '/__atlas_dev/generate')).status, 405);
   } finally {
     await server?.close();
     await rm(f.root, { recursive: true, force: true });

@@ -1,7 +1,21 @@
+// The Vite development plugin: serves the exported map data, generates it on a
+// cold start, keeps serving the published snapshot while a background
+// regeneration runs, and hosts the dev tools panel and its small API.
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { localGenerator } from './dev-generation.mjs';
+import { fileURLToPath } from 'node:url';
+import {
+  DEFAULT_DEV_MAPS,
+  availableStations,
+  deleteSnapshot,
+  devMaps,
+  listSnapshots,
+  localGenerator,
+  readDevSettings,
+  readStamp,
+  writeDevSettings,
+} from './dev-generation.mjs';
 
 const types = {
   '.json': 'application/json',
@@ -21,12 +35,16 @@ const alive = (pid) => {
     return false;
   }
 };
+const DEVTOOLS_CLIENT = fileURLToPath(new URL('./devtools-client.js', import.meta.url));
+/** The station list is re-read from the checkout at most this often. */
+const STATIONS_CACHE_MS = 10000;
 
+/** The page shown while no usable dataset exists yet (cold start or a broken export). */
 export function loadingPage() {
   return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Preparing Station Atlas</title>
-<style>:root{color-scheme:dark;font-family:system-ui;font-size:100%;background:#0b1420;color:#e3eef7}body{margin:0;min-height:100vh;display:grid;place-items:center}main{width:min(34rem,85vw)}small{color:#7ddfc6}h1{font-size:1.75rem}p{font-size:1rem;line-height:1.6;color:#b6c8da}progress{width:100%;accent-color:#7ddfc6;height:1rem}#detail{min-height:3rem}code{color:#7ddfc6}</style>
-<main><small>LOCAL DEVELOPMENT</small><h1>Preparing Station Atlas</h1><p id="detail" role="status">Checking the exported map assets...</p><progress aria-label="Asset preparation" max="100"></progress><p id="count"></p><p>The viewer will open automatically when the assets are ready. Generator hashes and the local upstream commit are checked automatically. Unchanged exports are reused; UI edits do not regenerate maps.</p><button id="retry" hidden>Retry preparation</button></main>
-<script type="module">const detail=document.querySelector('#detail'),bar=document.querySelector('progress'),count=document.querySelector('#count'),retry=document.querySelector('#retry');retry.onclick=async()=>{retry.hidden=true;await fetch('/__atlas_dev/retry',{method:'POST'})};async function poll(){try{const r=await fetch('/__atlas_dev/status',{cache:'no-store'});if(!r.ok)throw Error('Status unavailable');const s=await r.json();if(s.phase==='ready'){location.reload();return}detail.textContent=s.message;bar.value=s.percent||0;retry.hidden=s.phase!=='error';count.textContent=s.phase==='error'?'Fix the error or retry preparation. Input changes are detected automatically.':Math.floor(s.percent||0)+'%';}catch{detail.textContent='Waiting for the development server to reconnect...'}setTimeout(poll,700)}poll();</script></html>`;
+<style>:root{color-scheme:dark;font-family:system-ui;font-size:100%;background:#0b1420;color:#e3eef7}body{margin:0;min-height:100vh;display:grid;place-items:center}main{width:min(34rem,85vw)}small{color:#7ddfc6}h1{font-size:1.75rem}p{font-size:1rem;line-height:1.6;color:#b6c8da}progress{width:100%;accent-color:#7ddfc6;height:1rem}#detail{min-height:3rem}code{color:#7ddfc6}button{font:inherit;padding:.5rem 1rem;border-radius:.4rem;border:1px solid #4f5e6b;background:#16222f;color:inherit;cursor:pointer}</style>
+<main><small>LOCAL DEVELOPMENT</small><h1>Preparing Station Atlas</h1><p id="detail" role="status">Checking the exported map assets...</p><progress aria-label="Asset preparation" max="100"></progress><p id="count"></p><p>The viewer opens automatically when the assets are ready. Later changes to the generator or the upstream checkout are only reported in the dev tools; regeneration then runs in the background while the viewer stays usable.</p><button id="retry" hidden>Retry preparation</button></main>
+<script type="module">const detail=document.querySelector('#detail'),bar=document.querySelector('progress'),count=document.querySelector('#count'),retry=document.querySelector('#retry');retry.onclick=async()=>{retry.hidden=true;await fetch('/__atlas_dev/retry',{method:'POST'})};async function poll(){try{const r=await fetch('/__atlas_dev/status',{cache:'no-store'});if(!r.ok)throw Error('Status unavailable');const s=await r.json();if(s.phase==='ready'){location.reload();return}detail.textContent=s.message;bar.value=s.percent||0;retry.hidden=s.phase!=='error';count.textContent=s.phase==='error'?'Fix the error or retry preparation.':Math.floor(s.percent||0)+'%';}catch{detail.textContent='Waiting for the development server to reconnect...'}setTimeout(poll,700)}poll();</script></html>`;
 }
 
 // Check only the catalog's selected snapshot, never old snapshots or scratch dirs.
@@ -81,6 +99,29 @@ export async function validateDataset(root, report = () => {}) {
   return files;
 }
 
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 65536) reject(new Error('Request too large'));
+    });
+    req.on('end', () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function sendJson(res, status, value) {
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(value));
+}
+
 export function devAssets({ generationFactory = localGenerator } = {}) {
   let generation;
   return {
@@ -91,45 +132,51 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
         publicRoot = path.join(root, 'public');
       generation = generationFactory(root);
       let expectedFiles = new Set();
+      /** True once a complete dataset was validated; it keeps being served during regeneration. */
+      let serving = false;
       let state = { phase: 'checking', percent: 0, message: 'Checking exported map assets' },
         signature,
         checking = false,
-        activeExport = false,
+        externalExport = null,
         retryAfter = 0;
+      let stationsCache = { time: 0, stations: [] };
+
       const refresh = async () => {
         if (checking) return;
         checking = true;
         try {
+          // An export started outside this server (pnpm export) is reported but not interfered with.
           let progress;
           try {
             progress = JSON.parse(await readFile(path.join(root, '.cache/export-progress.json'), 'utf8'));
           } catch {}
-          if (progress?.phase === 'preparing' && alive(progress.pid) && !generation?.active) {
-            activeExport = true;
+          externalExport =
+            progress?.phase === 'preparing' && alive(progress.pid) && !generation?.active ? progress : null;
+          if (externalExport && !serving) {
             state = progress;
             return;
           }
           await generation?.tick();
           if (generation?.status) {
             state = generation.status;
-            return;
+            if (!serving) return;
           }
           const info = await stat(path.join(publicRoot, 'data/manifest.json'));
           const next = `${info.mtimeMs}:${info.size}`;
-          if (signature === next && state.phase === 'error' && Date.now() < retryAfter && !activeExport)
-            return;
-          if (signature === next && state.phase === 'ready' && !activeExport) return;
+          if (signature === next && state.phase === 'error' && Date.now() < retryAfter) return;
+          if (signature === next && (serving || state.phase === 'ready')) return;
           signature = next;
-          activeExport = false;
-          state = { phase: 'checking', percent: 0, message: 'Checking exported map assets' };
+          if (!serving) state = { phase: 'checking', percent: 0, message: 'Checking exported map assets' };
           expectedFiles = await validateDataset(root, (message, percent) => {
-            state = { phase: 'checking', message, percent };
+            if (!serving) state = { phase: 'checking', message, percent };
           });
           signature = next;
+          serving = true;
           state = { phase: 'ready', percent: 100, message: 'Assets ready' };
         } catch (error) {
           // Retry incomplete files without continuously rescanning a large map.
           retryAfter = Date.now() + 10000;
+          serving = false;
           generation?.invalidate();
           state = {
             phase: generation ? 'preparing' : 'error',
@@ -145,8 +192,100 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
       timer.unref();
       server.httpServer?.once('close', () => {
         clearInterval(timer);
-        void generation?.close();
+        void generation?.close?.();
       });
+
+      const stations = async () => {
+        if (Date.now() - stationsCache.time > STATIONS_CACHE_MS)
+          stationsCache = { time: Date.now(), stations: await availableStations(root) };
+        return stationsCache.stations;
+      };
+
+      /** Everything the dev tools panel shows, in one poll. */
+      const devStatus = async () => {
+        let manifest = null;
+        try {
+          manifest = JSON.parse(await readFile(path.join(publicRoot, 'data/manifest.json'), 'utf8'));
+        } catch {}
+        const stamp = await readStamp(root);
+        const settings = await readDevSettings(root);
+        let selected = null;
+        try {
+          selected = devMaps(process.env, settings);
+        } catch {}
+        return {
+          ...(serving ? { phase: 'ready', percent: 100, message: 'Assets ready' } : state),
+          serving,
+          dataset: manifest
+            ? {
+                buildId: manifest.buildId,
+                commit: manifest.commit,
+                snapshot: manifest.dataPath?.replace(/^snapshots\/|\/$/g, '') || null,
+                maps: (manifest.maps || []).map((map) => ({ id: map.id, name: map.name })),
+                generated: stamp?.generated || null,
+              }
+            : null,
+          generation: generation
+            ? {
+                mode: generation.mode,
+                active: !!generation.active,
+                stale: generation.stale,
+                job: generation.job,
+                log: generation.log,
+              }
+            : null,
+          external: externalExport
+            ? { message: externalExport.message, percent: externalExport.percent }
+            : null,
+          maps: {
+            selected,
+            saved: settings.maps !== undefined,
+            environment: process.env.ATLAS_DEV_MAPS ?? null,
+            defaults: DEFAULT_DEV_MAPS,
+            available: await stations(),
+          },
+        };
+      };
+
+      const routes = {
+        'GET /__atlas_dev/status': async (req, res) => sendJson(res, 200, await devStatus()),
+        'POST /__atlas_dev/retry': async (req, res) => {
+          generation?.invalidate();
+          res.writeHead(204).end();
+          void refresh();
+        },
+        'POST /__atlas_dev/generate': async (req, res) => {
+          const body = await readBody(req);
+          const started = (await generation?.request?.({ full: !!body.full })) ?? false;
+          sendJson(res, started ? 202 : 409, { started });
+        },
+        'POST /__atlas_dev/cancel': async (req, res) =>
+          sendJson(res, 200, { cancelled: generation?.cancel?.() ?? false }),
+        'POST /__atlas_dev/maps': async (req, res) => {
+          const body = await readBody(req);
+          let maps = null;
+          if (body.maps !== null) {
+            if (!Array.isArray(body.maps)) throw new Error('maps must be an array or null');
+            const known = new Set((await stations()).map((station) => station.id));
+            maps = [...new Set(body.maps.map(String))];
+            for (const id of maps) if (!known.has(id)) throw new Error(`Unknown map: ${id}`);
+          }
+          await writeDevSettings(root, { ...(await readDevSettings(root)), maps });
+          stationsCache.time = 0;
+          sendJson(res, 200, { maps });
+        },
+        'GET /__atlas_dev/snapshots': async (req, res) => sendJson(res, 200, await listSnapshots(root)),
+        'POST /__atlas_dev/snapshots/delete': async (req, res) => {
+          const body = await readBody(req);
+          await deleteSnapshot(root, String(body.id || ''));
+          sendJson(res, 200, { deleted: body.id });
+        },
+        'GET /__atlas_dev/devtools.js': async (req, res) => {
+          res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' });
+          res.end(await readFile(DEVTOOLS_CLIENT));
+        },
+      };
+
       server.middlewares.use(async (req, res, next) => {
         let pathname, versioned;
         try {
@@ -157,29 +296,27 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
           res.writeHead(400).end();
           return;
         }
-        if (pathname === '/__atlas_dev/retry') {
-          if (req.method !== 'POST') {
-            res.writeHead(405).end();
+        if (pathname.startsWith('/__atlas_dev/')) {
+          const route = routes[`${req.method} ${pathname}`];
+          if (!route) {
+            res.writeHead(routes[`GET ${pathname}`] || routes[`POST ${pathname}`] ? 405 : 404).end();
             return;
           }
-          generation?.invalidate();
-          res.writeHead(204).end();
-          void refresh();
-          return;
-        }
-        if (pathname === '/__atlas_dev/status') {
-          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-          res.end(JSON.stringify(state));
+          try {
+            await route(req, res);
+          } catch (error) {
+            sendJson(res, 400, { error: error.message });
+          }
           return;
         }
         const document = pathname === '/' || pathname === '/index.html';
-        if (document && state.phase !== 'ready') {
+        if (document && !serving) {
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
           res.end(loadingPage());
           return;
         }
         const dataRequest = pathname.startsWith('/data/');
-        if (dataRequest && state.phase !== 'ready') {
+        if (dataRequest && !serving) {
           res.writeHead(503, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-store',
@@ -230,6 +367,7 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
             if (repair) {
               generation.invalidate();
               signature = undefined;
+              serving = false;
               state = {
                 phase: 'preparing',
                 percent: 0,
@@ -247,16 +385,17 @@ export function devAssets({ generationFactory = localGenerator } = {}) {
       });
     },
     async closeBundle() {
-      await generation?.close();
+      await generation?.close?.();
     },
+    // The dev tools panel is injected into the page; it polls the status route.
     transformIndexHtml: {
       order: 'pre',
       handler() {
         return [
           {
             tag: 'script',
-            injectTo: 'head-prepend',
-            children: `setInterval(async()=>{try{const r=await fetch('/__atlas_dev/status',{cache:'no-store'});if(r.ok&&(await r.json()).phase!=='ready')location.reload()}catch{}},1500);`,
+            injectTo: 'body',
+            attrs: { src: '/__atlas_dev/devtools.js', 'data-status': '/__atlas_dev/status' },
           },
         ];
       },

@@ -20,6 +20,16 @@ function deckShade(depth: number): number {
 
 let annotationsPainted = false;
 let scaleText = '';
+const frameTiming = { last: 0, total: 0, count: 0 };
+
+/** CPU time of the last frame and the running average, for the development tools. */
+export function frameStats(): { last: number; average: number; count: number } {
+  return {
+    last: frameTiming.last,
+    average: frameTiming.count ? frameTiming.total / frameTiming.count : 0,
+    count: frameTiming.count,
+  };
+}
 
 function updateScaleText(): void {
   const tileWidth = TILE * state.zoom;
@@ -28,6 +38,17 @@ function updateScaleText(): void {
 }
 
 function render(): void {
+  const started = performance.now();
+  try {
+    paintFrame();
+  } finally {
+    frameTiming.last = performance.now() - started;
+    frameTiming.total += frameTiming.last;
+    frameTiming.count++;
+  }
+}
+
+function paintFrame(): void {
   if (isSidebarAnimating()) redraw();
   const detail = String(detailForZoom(state.zoom));
   if (mapCanvas.dataset.detail !== detail) mapCanvas.dataset.detail = detail;
