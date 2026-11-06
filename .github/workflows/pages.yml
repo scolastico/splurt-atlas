@@ -140,23 +140,39 @@ jobs:
           enable_jekyll: false
           force_orphan: true
           keep_files: false
-      - name: Refresh Pages from the release branch when enabled
-        uses: actions/github-script@v7
+  # The release branch keeps the published files as the baseline for incremental
+  # builds; Pages itself is deployed from the build artifact. Branch-based Pages
+  # builds time out after ten minutes on a site with thousands of map files.
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: atlas-pages
+      cancel-in-progress: false
+    timeout-minutes: 45
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          script: |
-            let site;
-            try {
-              ({ data: site } = await github.rest.repos.getPages(context.repo));
-            } catch (error) {
-              if (error.status === 404) {
-                core.notice('Static release branch is ready. Enable Pages from release / (root) in repository settings.');
-                return;
-              }
-              throw error;
-            }
-            if (site.source?.branch !== 'release' || site.source?.path !== '/') {
-              core.notice('Select Deploy from a branch, release / (root), in Pages settings.');
-              return;
-            }
-            // GITHUB_TOKEN pushes do not themselves trigger branch-based Pages builds.
-            await github.rest.repos.requestPagesBuild(context.repo);
+          name: station-atlas
+          path: dist
+      - name: Switch Pages to deploy from this workflow
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          # Thousands of map files take longer than the ten-minute default.
+          timeout: 2400000
+          error_count: 10
