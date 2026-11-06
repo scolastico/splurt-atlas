@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 const url=process.env.ATLAS_URL||'http://127.0.0.1:5173/';
 const browser=await chromium.launch({headless:false}),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',error=>errors.push(error.message));
-const savedKeys=()=>page.evaluate(()=>new Promise(resolve=>{const open=indexedDB.open('splurt-atlas-assets-v1',1);open.onsuccess=()=>{const db=open.result,request=db.transaction('assets').objectStore('assets').getAllKeys();request.onsuccess=()=>{resolve(request.result);db.close();};};}));
+const savedKeys=()=>page.evaluate(()=>new Promise(resolve=>{const open=indexedDB.open('splurt-atlas-assets-v1');open.onsuccess=()=>{const db=open.result,request=db.transaction('assets').objectStore('assets').getAllKeys();request.onsuccess=()=>{resolve(request.result);db.close();};};}));
 try{
  const target=new URL(url);target.hash='m=tramstation';await page.goto(target.href);
  await page.locator('#storage-dialog').waitFor({state:'visible'});

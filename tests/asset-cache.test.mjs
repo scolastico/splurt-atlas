@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {indexedDB} from 'fake-indexeddb';import {AssetCache} from '../src/asset-cache.js';
+import test from 'node:test';import assert from 'node:assert/strict';import {indexedDB} from 'fake-indexeddb';import JSZip from 'jszip';import {AssetCache} from '../src/asset-cache.js';
 globalThis.indexedDB=indexedDB;const preferences=new Map();globalThis.localStorage={getItem:key=>preferences.get(key)??null,setItem:(key,value)=>preferences.set(key,String(value))};
 test('IndexedDB persists blobs across cache instances and disabling caching bypasses it',async()=>{
  preferences.clear();preferences.set('atlas-storage-mode','all');let requests=0;globalThis.fetch=async()=>{requests++;return new Response(new Blob(['sprite-bytes'],{type:'image/webp'}));};
@@ -58,4 +58,37 @@ test('an incremental release retains cached images for maps that were reused',as
  await cache.get('https://example.test/two','two/base.webp');assert.equal(requests,2);
  await cache.get('https://example.test/one','one/base.webp');assert.equal(requests,3);
  assert.equal(await cache.read('test-map-versions:one-1:one/base.webp'),null);
+});
+
+async function zipFixture(){
+ const zip=new JSZip();zip.file('assets.json',JSON.stringify([{path:'map.json',bytes:2},{path:'1/base.webp',bytes:6}]));zip.file('map.json','{}');zip.file('1/base.webp','sprite');
+ const blob=new Blob([await zip.generateAsync({type:'uint8array'})],{type:'application/zip'});
+ const maps=['first','second'].map(id=>({id,name:id,assets:`${id}/assets.json`,assetVersion:'map-1',archive:{path:`${id}.zip`,bytes:blob.size}}));
+ return{blob,manifest:{buildId:'build-1',maps},base:new URL('https://example.test/data/')};
+}
+test('ZIP warming downloads once per map, persists archives separately and reopens without asset requests',async()=>{
+ preferences.clear();preferences.set('atlas-storage-mode','all');const {blob,manifest,base}=await zipFixture(),requests=[];
+ globalThis.fetch=async url=>{requests.push(String(url));return new Response(blob);};
+ const cache=new AssetCache('test-zip-all');cache.setManifest(manifest);await cache.warm(manifest,base);
+ assert.deepEqual(requests,['https://example.test/data/first.zip','https://example.test/data/second.zip']);
+ assert.equal((await cache.archiveRecord('test-zip-all:map-1:first/archive.zip')).complete,true);
+ const reopened=new AssetCache('test-zip-all');reopened.setManifest(manifest);await reopened.warm(manifest,base);
+ assert.equal(requests.length,2);assert.equal(await(await reopened.get(new URL('second/1/base.webp',base),'second/1/base.webp')).text(),'sprite');assert.equal(requests.length,2);
+ // An evicted extracted asset is repaired from the saved archive without a download.
+ const db=await reopened.database;await new Promise(resolve=>{const tx=db.transaction('assets','readwrite');tx.objectStore('assets').delete('test-zip-all:map-1:second/1/base.webp');tx.oncomplete=resolve;});reopened.keys.delete('test-zip-all:map-1:second/1/base.webp');
+ await reopened.warm(manifest,base);assert.ok(await reopened.read('test-zip-all:map-1:second/1/base.webp'));assert.equal(requests.length,2);
+ reopened.setMode('current');reopened.setCurrentMap('second');await reopened.warm(manifest,base);
+ assert.equal(await reopened.archiveRecord('test-zip-all:map-1:first/archive.zip'),undefined);assert.equal(await reopened.read('test-zip-all:map-1:first/map.json'),null);
+ reopened.setMode('none');await reopened.warm(manifest,base);assert.equal(await reopened.archiveRecord('test-zip-all:map-1:second/archive.zip'),undefined);
+});
+test('interrupted ZIP extraction resumes from IndexedDB and a cancelled download cannot save an unwanted map',async()=>{
+ preferences.clear();preferences.set('atlas-storage-mode','current');const {blob,manifest,base}=await zipFixture();let requests=0;
+ globalThis.fetch=async()=>{requests++;return new Response(blob);};
+ const cache=new AssetCache('test-zip-resume');cache.setManifest(manifest);cache.setCurrentMap('first');const unpack=cache.unpack;
+ cache.unpack=async()=>{throw new DOMException('Interrupted','AbortError');};await cache.warm(manifest,base);
+ assert.equal((await cache.archiveRecord('test-zip-resume:map-1:first/archive.zip')).complete,false);
+ cache.unpack=unpack;await cache.warm(manifest,base);assert.equal(requests,1);assert.equal((await cache.archiveRecord('test-zip-resume:map-1:first/archive.zip')).complete,true);
+ let finish;globalThis.fetch=()=>new Promise(resolve=>finish=resolve);cache.setCurrentMap('second');const pending=cache.warm(manifest,base);
+ while(!finish)await new Promise(resolve=>setTimeout(resolve,0));cache.setMode('none');finish(new Response(blob));await pending;await cache.warm(manifest,base);
+ assert.equal(await cache.archiveRecord('test-zip-resume:map-1:second/archive.zip'),undefined);assert.equal(await cache.read('test-zip-resume:map-1:second/map.json'),null);
 });

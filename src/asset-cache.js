@@ -5,8 +5,10 @@ export class AssetCache {
     try{const saved=localStorage.getItem('atlas-storage-mode');if(['all','current','none'].includes(saved))this.mode=saved;this.currentMap=localStorage.getItem('atlas-storage-map');}catch{}
     this.database=new Promise(resolve=>{
       if(!globalThis.indexedDB){resolve(null);return;}
-      const request=indexedDB.open(DATABASE,1);
-      request.onupgradeneeded=()=>request.result.createObjectStore('assets',{keyPath:'key'});
+      const request=indexedDB.open(DATABASE,2);
+      request.onupgradeneeded=()=>{for(const store of ['assets','archives'])if(!request.result.objectStoreNames.contains(store))request.result.createObjectStore(store,{keyPath:'key'});};
+      request.onblocked=()=>this.onStatus('Close other atlas tabs to finish upgrading offline storage.');
+      request.addEventListener('success',()=>{request.result.onversionchange=()=>request.result.close();});
       request.onsuccess=()=>resolve(request.result);request.onerror=()=>{this.onStatus('Local storage is unavailable; using the network.');resolve(null);};
     });
     this.keysReady=this.database.then(db=>new Promise(resolve=>{if(!db){this.keys=null;resolve(null);return;}const request=db.transaction('assets').objectStore('assets').getAllKeys();request.onsuccess=()=>{this.keys=new Set(request.result);resolve(this.keys);};request.onerror=()=>{this.keys=null;resolve(null);};}));
@@ -22,7 +24,7 @@ export class AssetCache {
       for(const key of this.buffer.keys())if(!this.canStoreKey(key))this.buffer.delete(key);
       const batch=[...this.buffer];if(!batch.length)return;
       await new Promise(resolve=>{const tx=db.transaction('assets','readwrite',{durability:'relaxed'}),store=tx.objectStore('assets');for(const [key,blob]of batch)store.put({key,blob,bytes:blob.size});tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>{this.storageFull=true;this.onStatus('Storage is full or unavailable. Existing saved maps remain usable.');resolve();};});
-      for(const [key,blob]of batch){this.keys?.add(key);if(this.buffer.get(key)===blob)this.buffer.delete(key);}
+      for(const [key,blob]of batch){if(!this.storageFull)this.keys?.add(key);if(this.buffer.get(key)===blob)this.buffer.delete(key);}
     })();
     await this.flushing;this.flushing=null;if(this.buffer.size)return this.flushWrites();
   }
@@ -31,13 +33,15 @@ export class AssetCache {
   versionFor(path){return this.mapVersions?.get(path.split('/')[0])||this.version;}
   canStore(path){return this.mode==='all'||(this.mode==='current'&&this.currentMap&&path.startsWith(this.currentMap+'/'));}
   canStoreKey(key){const prefix=this.scope+':';if(!this.enabled||!key.startsWith(prefix))return false;if(key===`${prefix}catalog`)return true;const suffix=key.slice(prefix.length),split=suffix.indexOf(':'),file=suffix.slice(split+1);return split>0&&suffix.slice(0,split)===this.versionFor(file)&&this.canStore(file);}
-  setMode(mode){if(!['all','current','none'].includes(mode))throw new Error('Invalid storage mode');this.mode=mode;this.warmRun++;try{localStorage.setItem('atlas-storage-mode',mode);}catch{}this.onStatus(mode==='none'?'Offline storage is off.':mode==='current'?'Preparing current map storage...':'Preparing offline maps...');}
-  setCurrentMap(id){if(this.currentMap!==id){this.currentMap=id;this.warmRun++;if(this.mode==='current')this.onStatus('Preparing current map storage...');try{localStorage.setItem('atlas-storage-map',id||'');}catch{}}}
+  stopWarm(){this.warmRun++;this.warmAbort?.abort();}
+  setMode(mode){if(!['all','current','none'].includes(mode))throw new Error('Invalid storage mode');this.mode=mode;this.stopWarm();try{localStorage.setItem('atlas-storage-mode',mode);}catch{}this.onStatus(mode==='none'?'Offline storage is off.':mode==='current'?'Preparing current map storage...':'Preparing offline maps...');}
+  setCurrentMap(id){if(this.currentMap!==id){this.currentMap=id;if(this.mode!=='all')this.stopWarm();if(this.mode==='current')this.onStatus('Preparing current map storage...');try{localStorage.setItem('atlas-storage-map',id||'');}catch{}}}
   async prune(){
     const db=await this.database;await this.keysReady;if(this.flushing)await this.flushing;if(!db||!this.mode)return;
     const prefix=this.scope+':';
     const keep=key=>this.canStoreKey(key);
     for(const key of this.buffer.keys())if(key.startsWith(prefix)&&!keep(key))this.buffer.delete(key);
+    await new Promise(resolve=>{const tx=db.transaction('archives','readwrite'),request=tx.objectStore('archives').openCursor();request.onsuccess=()=>{const cursor=request.result;if(cursor){if(cursor.key.startsWith(prefix)&&!keep(cursor.key))cursor.delete();cursor.continue();}};tx.oncomplete=tx.onerror=tx.onabort=()=>resolve();});
     const obsolete=[...(this.keys||[])].filter(key=>key.startsWith(prefix)&&!keep(key));if(!obsolete.length)return;
     await new Promise(resolve=>{const tx=db.transaction('assets','readwrite'),store=tx.objectStore('assets');for(const key of obsolete)store.delete(key);tx.oncomplete=()=>{for(const key of obsolete)this.keys.delete(key);resolve();};tx.onerror=tx.onabort=()=>resolve();});
   }
@@ -56,9 +60,76 @@ export class AssetCache {
     })();
     this.pending.set(key,task);try{return await task;}finally{this.pending.delete(key);}
   }
+  async archiveRecord(key,record){
+    const db=await this.database;if(!db)return null;
+    if(record&&!this.canStoreKey(key))return null;
+    return new Promise((resolve,reject)=>{const tx=db.transaction('archives',record?'readwrite':'readonly'),store=tx.objectStore('archives');
+      const request=record?store.put({key,...record}):store.get(key);let value;request.onsuccess=()=>{value=request.result;};
+      tx.oncomplete=()=>resolve(value);tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Archive storage failed'));
+    });
+  }
+  async unpack(blob,onBatch,signal){
+    if(typeof Worker==='undefined'){const {extractArchive}=await import('./archive-extract.js');return extractArchive(blob,onBatch,()=>signal.aborted);}
+    return new Promise((resolve,reject)=>{
+      const worker=new Worker(new URL('./archive-worker.js',import.meta.url),{type:'module'});
+      const finish=error=>{worker.terminate();signal.removeEventListener('abort',abort);error?reject(error):resolve();};
+      const abort=()=>finish(new DOMException('Offline saving interrupted','AbortError'));
+      signal.addEventListener('abort',abort,{once:true});if(signal.aborted){abort();return;}
+      worker.onerror=event=>finish(new Error(event.message||'Archive extraction failed'));
+      worker.onmessage=async({data})=>{if(data.error){finish(new Error(data.error));return;}if(data.done){finish();return;}
+        try{await onBatch(data.batch,data.complete,data.total);if(!signal.aborted)worker.postMessage({ack:true});}catch(error){finish(error);}
+      };
+      worker.postMessage({blob});
+    });
+  }
+  async warmArchives(manifest,base){
+    if(this.archiveWarming)return this.archiveWarming;
+    this.archiveWarming=this.saveArchives(manifest,base);try{await this.archiveWarming;}finally{this.archiveWarming=null;}
+  }
+  async saveArchives(manifest,base){
+    const run=++this.warmRun,controller=new AbortController();this.warmAbort=controller;const signal=controller.signal;
+    const stopped=()=>signal.aborted||run!==this.warmRun||!this.enabled;
+    try{
+      await this.prune();if(stopped())return;
+      const maps=this.mode==='all'?manifest.maps:manifest.maps.filter(map=>map.id===this.currentMap);
+      if(!maps.length){this.onStatus('Choose a map to save it on this device.');return;}
+      for(let index=0;index<maps.length;index++){
+        const map=maps[index],key=`${this.scope}:${this.versionFor(map.id+'/')}:${map.id}/archive.zip`;
+        if(stopped()||this.storageFull)return;
+        let record=await this.archiveRecord(key);
+        // Verify the extracted inventory too, so interrupted or evicted assets recover from the ZIP.
+        const inventory=await this.read(`${this.scope}:${this.versionFor(map.assets)}:${map.assets}`);
+        if(inventory){const assets=JSON.parse(await inventory.text());if(assets.length&&assets.every(asset=>this.keys?.has(`${this.scope}:${this.versionFor(map.id+'/')}:${map.id}/${asset.path}`)))continue;}
+        if(stopped())return;
+        let blob=record?.blob;
+        if(!blob){
+          this.onStatus(`Downloading ${map.name} ZIP (${index+1}/${maps.length})...`);
+          const response=await fetch(new URL(map.archive.path,base),{signal});if(!response.ok)throw new Error(`${map.name}: HTTP ${response.status}`);
+          const chunks=[];let received=0,last=0;const reader=response.body?.getReader();
+          if(reader){while(true){const {value,done}=await reader.read();if(done)break;chunks.push(value);received+=value.byteLength;const now=performance.now();if(now-last>200&&!stopped()){last=now;this.onStatus(`Downloading ${map.name} ZIP (${index+1}/${maps.length}): ${Math.round(received/1048576)} / ${Math.round(map.archive.bytes/1048576)} MB`);}}blob=new Blob(chunks,{type:'application/zip'});}else blob=await response.blob();
+          if(stopped())return;if(blob.size!==map.archive.bytes)throw new Error(`${map.name}: incomplete ZIP download`);
+          await this.archiveRecord(key,{blob,complete:false});
+        }
+        if(stopped())return;
+        try{await this.unpack(blob,async(batch,complete,total)=>{
+          if(stopped())throw new DOMException('Offline saving interrupted','AbortError');
+          for(const item of batch){const path=`${map.id}/${item.path}`,assetKey=`${this.scope}:${this.versionFor(path)}:${path}`;if(!this.keys?.has(assetKey))this.queueWrite(assetKey,item.blob);}
+          await this.flushWrites();if(this.storageFull)throw new Error('Storage is full');
+          if(!stopped())this.onStatus(`Extracting ${map.name} (${index+1}/${maps.length}): ${Math.round(complete/total*100)}%`);
+        },signal);}catch(error){if(error.name!=='AbortError'&&!this.storageFull){const db=await this.database;await new Promise(resolve=>{const tx=db.transaction('archives','readwrite');tx.objectStore('archives').delete(key);tx.oncomplete=tx.onerror=tx.onabort=()=>resolve();});}throw error;}
+        if(stopped())return;await this.archiveRecord(key,{blob,complete:true});
+      }
+      if(!stopped())this.onStatus(`${this.mode==='all'?`All ${maps.length} maps`:'Current map'} saved for reopening (ZIP downloads and extracted assets).`);
+    }catch(error){if(!stopped())this.onStatus(`Offline saving paused: ${error.message}. Reopening will retry.`);}
+    finally{if(this.warmAbort===controller)this.warmAbort=null;}
+  }
   async warm(manifest,base){
     if(!this.enabled){await this.prune();return;}
     if(!await this.database){this.onStatus('Local storage is unavailable; offline saving is paused.');return;}
+    if(manifest.maps.every(map=>map.archive)){
+      if(this.archiveWarming){await this.archiveWarming;if(!this.enabled)return;}
+      return this.warmArchives(manifest,base);
+    }
     const run=++this.warmRun;let complete=0,total=0,bytes=0;
     await this.prune();if(run!==this.warmRun)return;
     const maps=this.mode==='all'?manifest.maps:manifest.maps.filter(map=>map.id===this.currentMap);

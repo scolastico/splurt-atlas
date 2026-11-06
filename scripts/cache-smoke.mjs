@@ -8,7 +8,7 @@ try{
  const logger=setInterval(async()=>{try{console.log(await page.locator('#cache-status').textContent());}catch{}},15000);
  try{await page.waitForFunction(()=>document.querySelector('#cache-status').textContent.startsWith('All 16 maps saved'),{},{timeout:1800000});}finally{clearInterval(logger);}
  const cacheMs=Date.now()-started,blocked=[];
- const stored=await page.evaluate(()=>new Promise(resolve=>{const r=indexedDB.open('splurt-atlas-assets-v1',1);r.onsuccess=()=>{const q=r.result.transaction('assets').objectStore('assets').count();q.onsuccess=()=>resolve(q.result);};}));
+ const stored=await page.evaluate(()=>new Promise(resolve=>{const r=indexedDB.open('splurt-atlas-assets-v1');r.onsuccess=()=>{const q=r.result.transaction('assets').objectStore('assets').count();q.onsuccess=()=>resolve(q.result);};}));
  await context.close();await open();
  await page.route('**/data/**',route=>{if(new URL(route.request().url()).pathname.endsWith('/manifest.json'))route.continue();else{blocked.push(route.request().url());route.abort();}});
  await page.goto(url);await page.locator('#map-picker').waitFor({state:'visible'});await page.locator('.map-card').filter({hasText:'Tramstation'}).click();await page.locator('#loading').waitFor({state:'hidden',timeout:120000});

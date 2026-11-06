@@ -83,12 +83,13 @@ async function warmStorage(){
 }
 function storageSize(bytes){return (bytes/1048576).toFixed(1)+' MB';}
 function updateStorageSizes(){
-  const maps=state.manifest.maps,sizes=maps.map(map=>map.bytes||0),current=maps.find(map=>map.id===assetCache.currentMap);
+  const maps=state.manifest.maps,diskSize=map=>(map.bytes||0)+(map.archive?.bytes||0),sizes=maps.map(diskSize),current=maps.find(map=>map.id===assetCache.currentMap);
   const range=storageSize(Math.min(...sizes))+' to '+storageSize(Math.max(...sizes));
   const all=storageSize(sizes.reduce((a,b)=>a+b,0));
   $('storage-all-size').textContent=all+' for all '+maps.length+' maps';
-  $('storage-current-size').textContent=(current?storageSize(current.bytes)+' for '+current.name+'; ':'')+range+' depending on the map';
-  $('storage-size').textContent='All maps: '+all+'. Current map only: '+(current?storageSize(current.bytes)+' now; ':'')+range+' when switching maps. Estimates exclude a small browser storage overhead.';
+  $('storage-current-size').textContent=(current?storageSize(diskSize(current))+' for '+current.name+'; ':'')+range+' depending on the map';
+  $('storage-size').textContent='All maps: '+all+'. Current map only: '+(current?storageSize(diskSize(current))+' now; ':'')+range+' when switching maps. Includes saved ZIPs and extracted assets, plus a small browser storage overhead.';
+  const download=$('download-map');download.hidden=!current?.archive;if(current?.archive){download.href=new URL(current.archive.path,dataBase);download.download=current.id+'.zip';download.textContent='Download '+current.name+' ZIP ('+storageSize(current.archive.bytes)+')';}
 }
 async function chooseStorage(){
   updateStorageSizes();if(assetCache.mode)return;
@@ -713,7 +714,10 @@ function showMapPicker(){
   history.replaceState(null,'',location.pathname+location.search+(new URLSearchParams(location.hash.slice(1)).has('o')?'#o='+encodeOptions(Object.fromEntries(Object.keys(optionBits).map(key=>[key,$(key).checked]))):''));$('map-cards').replaceChildren();
   for(const map of state.manifest.maps){
     const button=document.createElement('button');button.className='map-card';button.innerHTML=`${map.preview===null?'<div class="map-preview-empty">Preview unavailable</div>':'<img alt="" loading="lazy">'}<strong>${escape(map.name)}</strong><small>${map.levels.length} ${map.levels.length===1?'deck':'decks'} · ${map.width} × ${map.height} tiles</small>`;
-    button.onclick=()=>{$('station').value=map.id;loadStation(map.id);};$('map-cards').append(button);
+    button.onclick=()=>{$('station').value=map.id;loadStation(map.id);};
+    const card=document.createElement('div');card.className='map-card-entry';card.append(button);
+    if(map.archive){const download=document.createElement('a');download.className='map-download';download.href=new URL(map.archive.path,dataBase);download.download=map.id+'.zip';download.textContent='Download ZIP ('+storageSize(map.archive.bytes)+')';card.append(download);}
+    $('map-cards').append(card);
     if(map.preview===null)continue;
     const path=($('runtime-terrain').checked&&map.naturalPreview)||map.preview||`${map.id}/${map.levels.at(-1)}/base-overview.webp`;
     assetCache.get(new URL(path,dataBase),path).then(blob=>{const url=URL.createObjectURL(blob),img=button.querySelector('img');img.onload=()=>URL.revokeObjectURL(url);img.src=url;}).catch(()=>{});
