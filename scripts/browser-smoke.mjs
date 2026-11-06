@@ -176,8 +176,9 @@ try {
   await page.goto(cutawayUrl.href); await page.locator('#loading').waitFor({ state: 'hidden' });
   await page.locator('#motion').uncheck(); await page.waitForLoadState('networkidle');
   const pixels = () => page.evaluate(({ x, y, opaqueX, opaqueY }) => {
-    const canvas = document.querySelector('#map'), c = canvas.getContext('2d');
-    return [[0, 0], [opaqueX - x, opaqueY - y]].map(([dx, dy]) => Array.from(c.getImageData(Math.floor(((canvas.width + (innerWidth > 650 && !document.body.classList.contains('sidebar-collapsed') ? document.querySelector('#sidebar').getBoundingClientRect().width * canvas.width / canvas.getBoundingClientRect().width : 0)) / 2) + dx * 64 - 2), Math.floor(canvas.height / 2 + dy * 64 - 2), 4, 4).data));
+    const readStation=(canvas,x,y,w,h)=>{const gl=canvas.getContext('webgl2')||canvas.getContext('webgl');if(!gl)return Array.from(canvas.getContext('2d').getImageData(x,y,w,h).data);const raw=new Uint8Array(w*h*4);gl.readPixels(x,canvas.height-y-h,w,h,gl.RGBA,gl.UNSIGNED_BYTE,raw);const out=[];for(let row=h-1;row>=0;row--)out.push(...raw.subarray(row*w*4,(row+1)*w*4));return out;};
+    const canvas = document.querySelector('#map');
+    return [[0, 0], [opaqueX - x, opaqueY - y]].map(([dx, dy]) => readStation(canvas, Math.floor(((canvas.width + (innerWidth > 650 && !document.body.classList.contains('sidebar-collapsed') ? document.querySelector('#sidebar').getBoundingClientRect().width * canvas.width / canvas.getBoundingClientRect().width : 0)) / 2) + dx * 64 - 2), Math.floor(canvas.height / 2 + dy * 64 - 2), 4, 4));
   }, geometry);
   const through = await pixels();
   await page.locator('#cutaway').uncheck(); await page.waitForTimeout(150);
@@ -192,8 +193,9 @@ try {
   await page.goto(asteroidUrl.href); await page.locator('#loading').waitFor({ state: 'hidden' });
   await page.locator('#motion').uncheck(); await page.waitForLoadState('networkidle');
   const asteroidPixels = () => page.locator('#map').evaluate(canvas => {
-    const ctx = canvas.getContext('2d'), x = Math.floor(((canvas.width + (innerWidth > 650 && !document.body.classList.contains('sidebar-collapsed') ? document.querySelector('#sidebar').getBoundingClientRect().width * canvas.width / canvas.getBoundingClientRect().width : 0)) / 2)), y = Math.floor(canvas.height/2);
-    return [Array.from(ctx.getImageData(x,y,1,1).data),Array.from(ctx.getImageData(x,y+64,1,1).data)];
+    const readStation=(canvas,x,y,w,h)=>{const gl=canvas.getContext('webgl2')||canvas.getContext('webgl');if(!gl)return Array.from(canvas.getContext('2d').getImageData(x,y,w,h).data);const raw=new Uint8Array(w*h*4);gl.readPixels(x,canvas.height-y-h,w,h,gl.RGBA,gl.UNSIGNED_BYTE,raw);const out=[];for(let row=h-1;row>=0;row--)out.push(...raw.subarray(row*w*4,(row+1)*w*4));return out;};
+    const x = Math.floor(((canvas.width + (innerWidth > 650 && !document.body.classList.contains('sidebar-collapsed') ? document.querySelector('#sidebar').getBoundingClientRect().width * canvas.width / canvas.getBoundingClientRect().width : 0)) / 2)), y = Math.floor(canvas.height/2);
+    return [readStation(canvas,x,y,1,1),readStation(canvas,x,y+64,1,1)];
   });
   const asteroidThrough = await asteroidPixels();
   await page.locator('#cutaway').uncheck(); await page.waitForTimeout(150);

@@ -6,7 +6,8 @@ try{
   await page.locator('#loading').waitFor({state:'hidden',timeout:120000});
   await page.locator('#explore-tab').click();await page.locator('#motion').uncheck();
   await page.waitForLoadState('networkidle');const extra=[];const request=r=>{if(r.url().includes('/data/'))extra.push(r.url());};page.on('request',request);const box=await page.locator('#map').boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.wheel(0,120);await page.waitForTimeout(400);page.off('request',request);assert.deepEqual(extra,[],'The first zoom out must use images decoded during the loading phase');
-  const pixels=()=>page.locator('#map').evaluate(canvas=>canvas.toDataURL());
+  // Station imagery is WebGL; simple utility symbols draw on the annotation canvas.
+  const pixels=()=>page.evaluate(()=>['#map','#annotations'].map(id=>document.querySelector(id).toDataURL()).join());
   for(const simple of [false,true]){
     await page.locator('#simple-utilities').setChecked(simple);
     for(const label of ['Power cables','Atmospherics']){

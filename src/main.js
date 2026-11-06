@@ -2,15 +2,19 @@ import './style.css';
 import { detailForZoom, deckScale, selectedTile, viewFragment, optionBits,encodeOptions,decodeOptions } from './view-state.js';
 import { AssetCache } from './asset-cache.js';
 import { indexDoorTiles, doorMarkersForRoles, roleSuggestions, groupDoorAccess } from './door-highlights.js';
-import { UTILITIES, slotIndex, hasChannel, stripName, decodeMap, decodeLevel } from '../scripts/lib/map-format.mjs';
+import { UTILITIES, slotIndex, slotCount, hasChannel, stripName, decodeMap, decodeLevel } from '../scripts/lib/map-format.mjs';
+import { createGlRenderer, create2dRenderer } from './gl-renderer.js';
 
 const $ = id => document.getElementById(id);
 if (import.meta.env.VITE_ATLAS_SOURCE_URL) { $('atlas-source').href = import.meta.env.VITE_ATLAS_SOURCE_URL; $('atlas-source').hidden = false; }
-const canvas = $('map'), ctx = canvas.getContext('2d');
+// Station imagery renders with WebGL (Canvas 2D fallback); annotations such as
+// room boundaries and utility symbols draw on a separate 2D canvas above it.
+const canvas = $('map'), renderer = createGlRenderer(canvas) || create2dRenderer(canvas);
+const annotations = $('annotations'), ctx = annotations.getContext('2d');
+let annotationsPainted = false;
 const connectionsCanvas = $('connection-overlay'), connectionsContext = connectionsCanvas.getContext('2d');
 let connectionsFrame = 0, lastConnectionsPaint = 0;
 const space = $('space'), background = space.getContext('2d', { alpha: false });
-const layer = document.createElement('canvas'), lc = layer.getContext('2d');
 const palette = { pipes: '#68c8b2', power: '#e5bd69', fluid:'#a798e5', disposal: '#ce8baf', transit: '#80addb' };
 const networkNames = { pipes: 'Atmospherics', power: 'Power cables', fluid:'Fluid ducts', disposal: 'Waste disposal', transit: 'Transit tubes' };
 const enabled = new Set(['transit']);
@@ -42,6 +46,8 @@ const images = new Map(), queue = [], failures = new Set();
 const CACHE_BYTES = 128 * 1024 * 1024, MAX_REQUESTS = 12;
 let warmImages=new Set(),loadingStation=false,inspectedResult=null,tileSeq=0,tileCandidates=[],imageBytes=0,scaleText='';
 let frameImages = new Set(), spaceFrame = 0, spaceTime = 0, lastSpaceTime = null, lastSpacePaint = 0;
+const panDirection = { x: 0, y: 0 }, lastCamera = { x: NaN, y: NaN, zoom: NaN };
+let prefetchImages = new Set();
 const regionChunks=new Map(),areaColors=new Map();
 const redraw = () => { if (!frame) frame = requestAnimationFrame(render); };
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -133,7 +139,7 @@ async function json(url, signal) {
 }
 
 function setLoading(message,show=true,progress=null){$('loading').hidden=!show;$('loading-message').textContent=message;if(progress===null)$('loading-progress').removeAttribute('value');else{$('loading-progress').max=1;$('loading-progress').value=progress;}}
-function requestReadyRedraw(){if(loadingStation)return;if([...frameImages].every(key=>images.get(key)?.ready||failures.has(key)))redraw();}
+function requestReadyRedraw(path){if(loadingStation)return;if(frameImages.has(path))redraw();}
 // Decode off the main thread where possible; drawing a freshly loaded
 // HTMLImageElement would otherwise decode synchronously inside the frame.
 // Premultiplied bitmaps draw about twice as fast in Chromium; their only cost
@@ -142,23 +148,22 @@ function decodeImage(blob){
   if(typeof createImageBitmap==='function')return createImageBitmap(blob);
   return new Promise((resolve,reject)=>{const url=URL.createObjectURL(blob),img=new Image();img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Image decode failed'));};img.src=url;});
 }
-const imageSize=image=>(image.width||image.naturalWidth)*(image.height||image.naturalHeight)*4;
-function ensureImage(path,urgent=false){
+function ensureImage(path,urgent=false,mask=0){
   if(images.has(path))return images.get(path);
-  const entry={path,ready:false,image:null,bytes:0,generation:state.generation,urgent};entry.promise=new Promise(resolve=>entry.resolve=resolve);
+  const entry={path,mask,ready:false,image:null,bytes:0,generation:state.generation,urgent,used:performance.now()};entry.promise=new Promise(resolve=>entry.resolve=resolve);
   images.set(path,entry);urgent?queue.unshift(entry):queue.push(entry);drain();return entry;
 }
-function image(path) {
+function image(path,mask) {
   frameImages.add(path);
   if (failures.has(path)) return null;
   const cached = images.get(path);
   if (cached) {
-    images.delete(path); images.set(path, cached);
+    images.delete(path); images.set(path, cached); cached.used = performance.now();
     // A strip that became visible jumps ahead of background warm-up loads.
     if (!cached.ready && !cached.urgent) { cached.urgent = true; const index = queue.indexOf(cached); if (index > 0) { queue.splice(index, 1); queue.unshift(cached); } }
     return cached.ready ? cached.image : null;
   }
-  ensureImage(path,true);
+  ensureImage(path,true,mask);
   return null;
 }
 function drain() {
@@ -166,26 +171,31 @@ function drain() {
     const entry = queue.shift(), { path } = entry;
     if (entry.generation !== state.generation) { if(images.get(path)===entry)images.delete(path);entry.resolve(null);continue; }
     activeRequests++;
-    assetCache.get(resolve(path),path,entry.urgent?'high':'auto').then(decodeImage).then(bitmap=>{
+    assetCache.get(resolve(path),path,entry.urgent?'high':'auto').then(decodeImage).then(bitmap=>renderer.prepare(bitmap,Math.max(1,slotCount(entry.mask)))).then(handle=>{
       activeRequests--;
-      if(images.get(path)!==entry){bitmap.close?.();entry.resolve(null);}
-      else{entry.image=bitmap;entry.bytes=imageSize(bitmap);imageBytes+=entry.bytes;entry.ready=true;entry.resolve(bitmap);}
-      drain();requestReadyRedraw();
+      if(images.get(path)!==entry){renderer.release(handle);entry.resolve(null);}
+      else{entry.image=handle;entry.bytes=handle.bytes;imageBytes+=entry.bytes;entry.ready=true;entry.resolve(handle);}
+      drain();requestReadyRedraw(path);
     }).catch(()=>{
       activeRequests--; failures.add(path); if(images.get(path)===entry)images.delete(path); drain();
-      entry.resolve(null);$('coords').textContent = 'Some image chunks failed · reload to retry';requestReadyRedraw();
+      entry.resolve(null);$('coords').textContent = 'Some image chunks failed · reload to retry';requestReadyRedraw(path);
     });
   }
 }
-function dropImage(path,entry){images.delete(path);if(entry.ready){imageBytes-=entry.bytes;entry.image.close?.();}}
+function dropImage(path,entry){images.delete(path);if(entry.ready){imageBytes-=entry.bytes;renderer.release(entry.image);}}
 function clearImages(){for(const [path,entry]of images)dropImage(path,entry);for(const pending of queue)pending.resolve(null);queue.length=0;failures.clear();imageBytes=0;}
 function trimImages() {
   if (imageBytes <= CACHE_BYTES) return;
+  // Protect this viewport's images and the tiles prefetched for it, and grow
+  // the budget when a large viewport needs more than the target itself:
+  // evicting what the next frame draws only causes churn and re-downloads.
+  let needed = 0; for (const key of new Set([...frameImages, ...prefetchImages])) needed += images.get(key)?.bytes || 0;
+  const budget = Math.max(CACHE_BYTES, needed * 1.5), now = performance.now();
   for (const [key, entry] of images) {
-    if (imageBytes <= CACHE_BYTES) break;
-    // Protect this viewport's images: changing detail to satisfy a tile-count
-    // budget caused the old border-dependent pixelation and cache churn.
-    if (entry.ready && !frameImages.has(key)&&!warmImages.has(key)&&!key.endsWith('/overview.webp')) dropImage(key,entry);
+    if (imageBytes <= budget) break;
+    // Tiles used within the last two seconds stay: a drag that changes
+    // direction would otherwise evict and re-download its own prefetches.
+    if (entry.ready && now - entry.used > 2000 && !frameImages.has(key)&&!prefetchImages.has(key)&&!warmImages.has(key)&&!key.endsWith('/overview.webp')) dropImage(key,entry);
   }
 }
 
@@ -251,105 +261,109 @@ function worldTransform(target, depth = 0) {
   target.setTransform(state.dpr * scale, 0, 0, state.dpr * scale, state.dpr * (screenCenterX() - state.x * scale), state.dpr * (screenCenterY() - state.y * scale));
 }
 
-// Every chunk is one strip image containing all of its channels, so a deck
-// view costs one request per chunk and its channels always arrive together.
-function deckImages(z,zoom=state.zoom,viewZoom=zoom) {
+// Every tile is one strip image containing all of its channels, so a deck
+// view costs one request per tile and its channels always arrive together.
+function deckImages(z,zoom=state.zoom,viewZoom=zoom,margin=null) {
   const data = state.levels.get(z); if (!data) return null;
   const S = state.manifest.tilePixels, chunkSize = S * state.manifest.chunkTiles, detail = detailForZoom(zoom), path = `${state.map.id}/${z}`;
   if (detail === 'overview') {
     // Lower decks only need the terrain strip; utilities show on the viewed deck.
     const items=[];
-    for(const [file,mask]of [['overview',data.overview],['overview-utilities',z===state.z?data.overviewUtilities:0]])if(mask)items.push({path:`${path}/${file}.webp`,mask,x:0,y:0,w:state.map.width*S,h:state.map.height*S});
-    return {detail,slot:[state.map.width*4,state.map.height*4],items};
+    for(const [file,mask]of [['overview',data.overview],['overview-utilities',z===state.z?data.overviewUtilities:0]])if(mask)items.push({path:`${path}/${file}.webp`,mask,lod:'overview',x:0,y:0,w:state.map.width*S,h:state.map.height*S,sw:state.map.width*4,sh:state.map.height*4});
+    return {detail,lod:'overview',items};
   }
   const scale = deckScale(viewZoom,state.z-z,state.motion);
-  const left = state.x - screenCenterX() / scale - S, top = state.y - screenCenterY() / scale - S;
-  const right = left + state.w / scale + S * 2, bottom = top + state.h / scale + S * 2;
+  const left = state.x - screenCenterX() / scale - S - (margin?.left || 0), top = state.y - screenCenterY() / scale - S - (margin?.top || 0);
+  const right = state.x + (state.w - screenCenterX()) / scale + S + (margin?.right || 0), bottom = state.y + (state.h - screenCenterY()) / scale + S + (margin?.bottom || 0);
   // Coarser levels pack 2×2 finer tiles per strip, so the image count per
   // frame stays similar at every zoom.
   const lod=Math.min(detail,data.pyramid.length-1), span=chunkSize<<lod, items=[];
-  for(const [tx,ty,mask]of data.pyramid[lod])if(!((tx + 1) * span < left || tx * span > right || (ty + 1) * span < top || ty * span > bottom))items.push({path:`${path}/${stripName(tx,ty,lod)}`,mask,x:tx*span,y:ty*span,w:span,h:span});
-  return {detail,slot:[chunkSize,chunkSize],items};
+  for(const [tx,ty,mask]of data.pyramid[lod])if(!((tx + 1) * span < left || tx * span > right || (ty + 1) * span < top || ty * span > bottom))items.push({path:`${path}/${stripName(tx,ty,lod)}`,mask,lod,tx,ty,x:tx*span,y:ty*span,w:span,h:span,sw:chunkSize,sh:chunkSize});
+  return {detail,lod,items};
 }
-// Whole decks switch resolution only when every requested strip is ready;
-// until then the finest fully cached coarser set stays on screen.
-function resolveDeck(z){
-  const wanted=deckImages(z);if(!wanted)return null;
-  for(const item of wanted.items){item.image=image(item.path);assetCache.priorityPaths?.add(item.path);}
-  if(wanted.items.every(item=>item.image||failures.has(item.path)))return wanted;
-  let tried=wanted.detail;
-  for(const zoom of [state.zoom/2,state.zoom/4,.01]){
-    const set=deckImages(z,zoom,state.zoom);if(!set||set.detail===tried)continue;tried=set.detail;
-    for(const item of set.items)item.image=images.get(item.path)?.image;
-    if(set.items.length&&set.items.every(item=>item.image)){for(const item of set.items)frameImages.add(item.path);return set;}
+// A tile that is not decoded yet borrows the matching part of its nearest
+// decoded coarser level (or the overview), so only that tile looks soft while
+// it loads instead of the whole deck dropping a resolution.
+function tileSources(z,item){
+  if(item.image)return [{handle:item.image,mask:item.mask,sx:0,sy:0,sw:item.sw,sh:item.sh}];
+  if(item.lod==='overview')return [];
+  const data=state.levels.get(z),S=state.manifest.tilePixels,chunkSize=S*state.manifest.chunkTiles;
+  for(let lod=item.lod+1;lod<data.pyramid.length;lod++){
+    const k=lod-item.lod,tx=item.tx>>k,ty=item.ty>>k,mask=data.tileMasks[lod].get(`${tx},${ty}`);if(mask===undefined)continue;
+    const path=`${state.map.id}/${z}/${stripName(tx,ty,lod)}`,entry=images.get(path);if(!entry?.ready)continue;
+    frameImages.add(path);const size=chunkSize>>k;
+    return [{handle:entry.image,mask,sx:(item.tx&((1<<k)-1))*size,sy:(item.ty&((1<<k)-1))*size,sw:size,sh:size}];
   }
-  if(wanted.detail!=='overview'){const set=deckImages(z,.01,state.zoom);for(const item of set.items)item.image=image(item.path);if(set.items.length&&set.items.every(item=>item.image))return set;}
-  return null;
-}
-function drawDeck(target,z,set,channels){
-  worldTransform(target,state.z-z);target.imageSmoothingEnabled=false;
-  const natural=$('runtime-terrain').checked,[slotWidth,slotHeight]=set.slot;
-  for(const channel of channels)for(const item of set.items){
-    if(!item.image)continue;
-    const slot=slotIndex(item.mask,channel==='base'&&natural&&hasChannel(item.mask,'natural')?'natural':channel);
-    if(slot>=0)target.drawImage(item.image,0,slot*slotHeight,slotWidth,slotHeight,item.x,item.y,item.w,item.h);
+  const sources=[],factor=4/S;
+  for(const [file,mask]of [['overview',data.overview],['overview-utilities',z===state.z?data.overviewUtilities:0]]){
+    if(!mask)continue;const path=`${state.map.id}/${z}/${file}.webp`,entry=images.get(path);if(!entry?.ready)continue;
+    frameImages.add(path);sources.push({handle:entry.image,mask,sx:item.x*factor,sy:item.y*factor,sw:item.w*factor,sh:item.h*factor});
   }
+  return sources;
 }
 function deckChannels(z){
   const channels=['base'];
   if(z===state.z){const simple=$('simple-utilities').checked&&state.map.infrastructure?.nodes?.length;for(const channel of UTILITIES){if(simple&&['power','pipes'].includes(channel))continue;channels.push(channel+'-surface');if(enabled.has(channel))channels.push(channel);}}
   channels.push('foreground');return channels;
 }
+function drawDeckTiles(z,shade){
+  const set=deckImages(z);if(!set)return;
+  const chunkSize=state.manifest.tilePixels*state.manifest.chunkTiles,scale=deckScale(state.zoom,state.z-z,state.motion),centerX=screenCenterX(),centerY=screenCenterY(),dpr=state.dpr,natural=$('runtime-terrain').checked;
+  for(const item of set.items){item.image=image(item.path,item.mask);assetCache.priorityPaths?.add(item.path);}
+  // Prefetch one tile beyond the edges the camera is moving toward, at low
+  // priority, so dragging rarely reaches tiles that are still loading.
+  if(set.lod!=='overview'&&(panDirection.x||panDirection.y)){const span=chunkSize<<set.lod,margin={left:panDirection.x<0?span:0,right:panDirection.x>0?span:0,top:panDirection.y<0?span:0,bottom:panDirection.y>0?span:0};for(const item of deckImages(z,state.zoom,state.zoom,margin)?.items||[]){prefetchImages.add(item.path);const entry=images.get(item.path);if(entry)entry.used=performance.now();else ensureImage(item.path,false,item.mask);}}
+  const sources=set.items.map(item=>tileSources(z,item));
+  renderer.beginDeck(shade);
+  for(const channel of deckChannels(z))for(const [index,item]of set.items.entries())for(const source of sources[index]){
+    const slot=slotIndex(source.mask,channel==='base'&&natural&&hasChannel(source.mask,'natural')?'natural':channel);if(slot<0)continue;
+    renderer.draw(source.handle,slot,source.sx,source.sy,source.sw,source.sh,((item.x-state.x)*scale+centerX)*dpr,((item.y-state.y)*scale+centerY)*dpr,item.w*scale*dpr,item.h*scale*dpr);
+    break;
+  }
+  renderer.endDeck();
+}
 // Block only on what the first frame draws; zoom neighbors load afterwards so
 // the first zoom step needs no new requests without delaying the station.
 async function prepareView(generation){
-  const first=new Set(),warm=new Set();
+  const first=new Map(),warm=new Map();
   const levels=state.map.levels.filter(z=>z<=state.z&&(state.cutaway||z===state.z));
-  for(const z of state.map.levels)if(state.levels.get(z)?.overview)(z<=state.z?first:warm).add(`${state.map.id}/${z}/overview.webp`);
+  for(const z of state.map.levels){const data=state.levels.get(z);if(data?.overview)(z<=state.z?first:warm).set(`${state.map.id}/${z}/overview.webp`,data.overview);}
   for(const z of levels){
-    for(const item of deckImages(z).items)first.add(item.path);
-    for(const zoom of [state.zoom/1.5,state.zoom/2,state.zoom*1.5])for(const item of deckImages(z,zoom)?.items||[])if(!first.has(item.path))warm.add(item.path);
+    for(const item of deckImages(z).items)first.set(item.path,item.mask);
+    for(const zoom of [state.zoom/1.5,state.zoom/2,state.zoom*1.5])for(const item of deckImages(z,zoom)?.items||[])if(!first.has(item.path))warm.set(item.path,item.mask);
   }
-  warmImages=new Set([...first,...warm]);assetCache.priorityPaths=new Set([`${state.map.id}/map.json`,`${state.map.id}/search.json`,`${state.map.id}/${state.z}.json`,...first,...warm]);let count=0;
-  for(const path of first)ensureImage(path,true);
-  for(const path of warm)ensureImage(path);
-  await Promise.all([...first].map(async path=>{await images.get(path)?.promise;if(generation===state.generation)setLoading(`Decoding the current view · ${++count} / ${first.size} images`,true,count/first.size);}));
+  warmImages=new Set([...first.keys(),...warm.keys()]);assetCache.priorityPaths=new Set([`${state.map.id}/map.json`,`${state.map.id}/search.json`,`${state.map.id}/${state.z}.json`,...first.keys(),...warm.keys()]);let count=0;
+  for(const [path,mask]of first)ensureImage(path,true,mask);
+  for(const [path,mask]of warm)ensureImage(path,false,mask);
+  await Promise.all([...first.keys()].map(async path=>{await images.get(path)?.promise;if(generation===state.generation)setLoading(`Decoding the current view · ${++count} / ${first.size} images`,true,count/first.size);}));
 }
 
 function render() {
   frame = 0;
   if(performance.now()<panelTransitionUntil)redraw();
   const detail=String(detailForZoom(state.zoom));if(canvas.dataset.detail!==detail)canvas.dataset.detail=detail;
-  frameImages = new Set();
+  frameImages = new Set(); prefetchImages = new Set();
   if(state.map)assetCache.priorityPaths=new Set([`${state.map.id}/map.json`,`${state.map.id}/search.json`,`${state.map.id}/${state.z}.json`]);
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over';
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
   // The space background lives on its own canvas: the animation loop repaints
   // it while motion is on, and it is static otherwise.
   updateConnectionHighlights();
-  if (!state.map||!state.ready) return;
-  const lower = state.cutaway ? state.map.levels.filter(z => z < state.z) : [];
-  if (lower.length) {
-    // Shade deeper decks without changing their opacity: an opaque middle
-    // floor must still occlude deeper floors. Preserve transparent sprite
-    // edges instead of cutting an entire 32px cell out of the lower deck.
-    // All lower decks share one layer; each shade step is chosen so that a
-    // deck's accumulated shade equals its own depth shade (mixing toward one
-    // color is linear, so this matches shading every deck separately).
-    const shade = depth => Math.min(.45, depth * .14);
-    lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, layer.width, layer.height);
-    for (const [index, z] of lower.entries()) {
-      const set = resolveDeck(z); if (set) drawDeck(lc, z, set, deckChannels(z));
-      const own = shade(state.z - z), next = index + 1 < lower.length ? shade(state.z - lower[index + 1]) : 0;
-      lc.setTransform(1, 0, 0, 1, 0, 0); lc.globalCompositeOperation = 'source-atop';
-      lc.fillStyle = `rgba(5,12,22,${1 - (1 - own) / (1 - next)})`;
-      lc.fillRect(0, 0, layer.width, layer.height); lc.globalCompositeOperation = 'source-over';
-    }
-    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(layer, 0, 0);
+  const drawable = !!(state.map && state.ready);
+  // Camera motion between frames steers the prefetch; zooming resets it.
+  panDirection.x = state.zoom === lastCamera.zoom ? Math.sign(state.x - lastCamera.x) : 0; panDirection.y = state.zoom === lastCamera.zoom ? Math.sign(state.y - lastCamera.y) : 0;
+  lastCamera.x = state.x; lastCamera.y = state.y; lastCamera.zoom = state.zoom;
+  renderer.begin();
+  if (drawable) {
+    // Deeper decks are shaded without changing their opacity, so an opaque
+    // middle floor still occludes deeper floors and transparent sprite edges
+    // stay see-through. Decks composite bottom-up.
+    if (state.cutaway) for (const z of state.map.levels) if (z < state.z) drawDeckTiles(z, Math.min(.45, (state.z - z) * .14));
+    drawDeckTiles(state.z, 0);
   }
-  const top = resolveDeck(state.z); if (top) drawDeck(ctx, state.z, top, deckChannels(state.z));
-  drawInfrastructure();
-  drawAnnotations();
+  renderer.end();
+  const wantAnnotations = drawable && (state.regions || $('simple-utilities').checked || $('power-networks').checked || state.selected?.z === state.z);
+  if (wantAnnotations || annotationsPainted) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, annotations.width, annotations.height); annotationsPainted = false; }
+  if (wantAnnotations) { drawInfrastructure(); drawAnnotations(); annotationsPainted = true; }
+  if (!drawable) return;
   trimImages();
   const tileWidth = 32 * state.zoom, scale = `${Math.max(1, Math.round(70 / tileWidth))} tiles / ${Math.round(state.zoom * 100)}%`;
   if (scale !== scaleText) $('scale').textContent = scaleText = scale;
@@ -518,9 +532,10 @@ function drawAnnotations() {
 
 function resize() {
   const rect = canvas.getBoundingClientRect(); state.w = rect.width; state.h = rect.height; state.dpr = Math.min(devicePixelRatio || 1, 2);
-  canvas.width = layer.width = Math.round(state.w * state.dpr);
-  canvas.height = layer.height = Math.round(state.h * state.dpr);
+  canvas.width = annotations.width = Math.round(state.w * state.dpr);
+  canvas.height = annotations.height = Math.round(state.h * state.dpr);
   space.width = connectionsCanvas.width = canvas.width; space.height = connectionsCanvas.height = canvas.height;
+  renderer.resize(canvas.width, canvas.height);
   // ResizeObserver runs before paint. Repaint synchronously so resizing never
   // presents a freshly cleared canvas for one frame.
   updateSpaceAnimation(); if (frame) cancelAnimationFrame(frame); render();
@@ -538,12 +553,14 @@ function zoom(factor, sx = screenCenterX(), sy = screenCenterY()) {
   state.x += (sx - screenCenterX()) * (1 / before - 1 / after); state.y += (sy - screenCenterY()) * (1 / before - 1 / after); state.zoom = after;
   redraw(); share();
 }
-function share() {
-  clearTimeout(shareTimer); shareTimer = setTimeout(() => {
+function share(immediate = false) {
+  clearTimeout(shareTimer);
+  const apply = () => {
     state.optionMask=encodeOptions(Object.fromEntries(Object.keys(optionBits).map(key=>[key,$(key).checked])));
     if(!state.map){history.replaceState(null,'',`#o=${state.optionMask}`);return;}
     history.replaceState(null, '', viewFragment(state));
-  }, 150);
+  };
+  if (immediate) apply(); else shareTimer = setTimeout(apply, 150);
 }
 function restoreOptions(params){
   if(!params.has('o'))return false;const options=decodeOptions(params.get('o'));if(!options)return false;
@@ -575,7 +592,7 @@ async function loadStation(id, restore = false) {
     const signal = loadAbort.signal, meta = decodeMap(await json(`${id}/map.json`, signal));
     const levelData = (await Promise.all(meta.levels.map(z => json(`${id}/${z}.json`, signal)))).map(decodeLevel);
     if (generation !== state.generation) return;
-    state.map = meta; state.levels = new Map(levelData.map(level => [level.z, level]));
+    state.map = meta; state.levels = new Map(levelData.map(level => [level.z, { ...level, tileMasks: level.pyramid.map(tiles => new Map(tiles.map(([x, y, mask]) => [`${x},${y}`, mask]))) }]));
     doorTiles=indexDoorTiles(meta,state.levels);
     const requestedRoles=restore?(params.get('j')||'').split(','):state.doorRoles||[];
     state.doorRoles=[...new Set(requestedRoles.filter(role=>(meta.jobRoles||[]).includes(role)))];
@@ -599,15 +616,18 @@ async function loadStation(id, restore = false) {
     if (tile) { if (state.z !== tile.z) setDeck(tile.z); inspect(tile.x, tile.y, tile.z,null,(params.get('h')||'').split(',').filter(value=>/^\d+$/.test(value)).map(Number)); }
     const restoreVersion = locationSeq;
     let resolveIndex;const indexReady=new Promise(resolve=>resolveIndex=resolve);
+    // The loading overlay stays until a finding from the URL is restored, so
+    // a visible station always has a complete, consistent state and URL.
+    let resolveRestore;const restoreReady=new Promise(resolve=>resolveRestore=resolve);if(!restoreTarget)resolveRestore();
     worker?.terminate(); worker = new Worker(new URL('./search.worker.js', import.meta.url), { type: 'module' });
     worker.onmessage = ({ data }) => {
       if (generation !== state.generation) return;
       if (data.type === 'ready') {
         state.searchReady = true; $('search-status').textContent = 'Search rooms, mapped items & loot candidates'; runSearch();
         resolveIndex();if(state.selected)worker.postMessage({type:'tile',tile:`${state.selected.x},${state.selected.y},${state.selected.z}`,seq:++tileSeq});
-        if (restoreTarget && restoreVersion === locationSeq) { locationTarget = restoreTarget; worker.postMessage({ type: 'locations', id: restoreTarget.id, seq: ++locationSeq }); }
+        if (restoreTarget && restoreVersion === locationSeq) { locationTarget = restoreTarget; worker.postMessage({ type: 'locations', id: restoreTarget.id, seq: ++locationSeq }); } else resolveRestore();
       }
-      if (data.type === 'error') { $('search-status').textContent = data.message;resolveIndex(); }
+      if (data.type === 'error') { $('search-status').textContent = data.message;resolveIndex();resolveRestore(); }
       if(data.type==='tile'&&data.seq===tileSeq){tileCandidates=data.possible;paintInspector();}
       if (data.type === 'results' && data.seq === searchSeq) showResults(data);
       if (data.type === 'locations' && data.seq === locationSeq && data.result) {
@@ -621,14 +641,15 @@ async function loadStation(id, restore = false) {
           locationTarget = null;
         }
         selectFinding(index, { focus: !restoring });
-      }
+        resolveRestore();
+      } else if (data.type === 'locations' && data.seq === locationSeq) resolveRestore();
     };
     // The worker parses and decodes the search records itself; transferring the
     // bytes avoids cloning a large object graph through the main thread.
     const searchBytes=await(await assetCache.get(resolve(`${id}/search.json`),`${id}/search.json`)).arrayBuffer();if(generation!==state.generation)return;
     worker.postMessage({ type: 'init', buffer:searchBytes, generation, rooms: meta.rooms || [] },[searchBytes]);
-    await Promise.all([prepareView(generation),indexReady]);if(generation!==state.generation)return;
-    state.ready=true;loadingStation=false;assetCache.foregroundBusy=false;canvas.style.pointerEvents='';setLoading('',false);$('source-status').textContent = 'ARCHIVE READY';redraw();
+    await Promise.all([prepareView(generation),indexReady,restoreReady]);if(generation!==state.generation)return;
+    state.ready=true;loadingStation=false;assetCache.foregroundBusy=false;canvas.style.pointerEvents='';setLoading('',false);$('source-status').textContent = 'ARCHIVE READY';redraw();share(true);
     $('search').disabled=false;for(const button of $('results').children)button.disabled=false;
     warmStorage();
   } catch (error) {

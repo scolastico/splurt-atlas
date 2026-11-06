@@ -3,7 +3,7 @@ const url=process.env.ATLAS_URL||'http://127.0.0.1:5173/',browser=await chromium
 try{
  for(const mobile of [false,true]){
   const context=await browser.newContext({viewport:mobile?{width:390,height:844}:{width:1440,height:1000},isMobile:mobile,hasTouch:mobile,deviceScaleFactor:1});const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
-  await page.addInitScript(()=>{localStorage.setItem('atlas-storage-mode','none');window.__mapTransforms=[];const original=CanvasRenderingContext2D.prototype.setTransform;CanvasRenderingContext2D.prototype.setTransform=function(...args){if(this.canvas.id==='map'&&args.length===6&&args[4]!==0)window.__mapTransforms.push([args[4],args[5]]);return original.apply(this,args);};});
+  await page.addInitScript(()=>{localStorage.setItem('atlas-storage-mode','none');window.__mapTransforms=[];const original=CanvasRenderingContext2D.prototype.setTransform;CanvasRenderingContext2D.prototype.setTransform=function(...args){if((this.canvas.id==='map'||this.canvas.id==='annotations')&&args.length===6&&args[4]!==0)window.__mapTransforms.push([args[4],args[5]]);return original.apply(this,args);};});
   await page.goto(url+'#m=boxstation&z=1&x=3248&y=4560&s=2&t=102,113,1');await page.locator('#loading').waitFor({state:'hidden',timeout:120000});await page.waitForTimeout(450);
   const canvas=await page.locator('#map').boundingBox(),panel=await page.locator('#sidebar').boundingBox();
   if(mobile){assert.equal(panel.x,0);assert.equal(panel.width,390);assert.ok(panel.y>250);assert.equal(await page.locator('#sidebar-resize').getAttribute('aria-orientation'),'horizontal');}
