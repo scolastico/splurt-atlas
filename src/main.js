@@ -613,6 +613,8 @@ async function loadStation(id, restore = false) {
       state.x = Math.max(0, Math.min(meta.width * 32, +params.get('x'))); state.y = Math.max(0, Math.min(meta.height * 32, +params.get('y'))); state.zoom = Math.max(.04, Math.min(5, +params.get('s'))); redraw();
     }
     const tile = restore ? selectedTile(params, meta) : null;
+    // A link that names a tile but no view (as the in-game "View in Browser" link does) opens centered on that tile.
+    if (tile && !['x', 'y', 's'].some(k => params.has(k))) { state.x = (tile.x - 1) * 32 + 16; state.y = (meta.height - tile.y) * 32 + 16; state.zoom = 1; redraw(); }
     if (tile) { if (state.z !== tile.z) setDeck(tile.z); inspect(tile.x, tile.y, tile.z,null,(params.get('h')||'').split(',').filter(value=>/^\d+$/.test(value)).map(Number)); }
     const restoreVersion = locationSeq;
     let resolveIndex;const indexReady=new Promise(resolve=>resolveIndex=resolve);
