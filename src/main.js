@@ -399,7 +399,7 @@ let overlayPainted = false;
 function drawConnectionHighlights(time = performance.now()) {
   const target = connectionsContext;
   const ready = state.ready && state.map && !document.hidden;
-  const wanted = ready && !!(doorMarkers.length || state.markers.length || (state.selected?.z === state.z && state.offsetHighlights?.size) || ($('connections').checked && state.map.infrastructure?.transitions?.length));
+  const wanted = ready && !!(doorMarkers.length || state.markers.length || (state.selected?.z === state.z && state.offsetHighlights?.size) || (($('connections').checked || $('connection-labels').checked) && state.map.infrastructure?.transitions?.length));
   // Skip the full-screen clear while the overlay is empty and stays empty.
   if (!wanted && !overlayPainted) return false;
   target.setTransform(1, 0, 0, 1, 0, 0);
@@ -428,7 +428,9 @@ function drawConnectionHighlights(time = performance.now()) {
       const padding=(2+pulse*2)/state.zoom;target.fillStyle=`rgba(106,224,255,${.08+pulse*.15})`;target.fillRect(x-padding,y-padding,bounds.width+padding*2,bounds.height+padding*2);target.lineWidth=2/state.zoom;target.strokeRect(x-padding,y-padding,bounds.width+padding*2,bounds.height+padding*2);
     }
   }
-  for (const link of $('connections').checked ? state.map.infrastructure?.transitions || [] : []) {
+  // Highlights and direction arrows are independent toggles; either one draws the transitions.
+  const highlight = $('connections').checked, labels = $('connection-labels').checked;
+  for (const link of highlight || labels ? state.map.infrastructure?.transitions || [] : []) {
     if (link.z !== state.z) continue;
     const x = (link.x - .5) * 32, y = (state.map.height - link.y + .5) * 32;
     const screenX = (x - state.x) * state.zoom + centerX, screenY = (y - state.y) * state.zoom + centerY;
@@ -438,8 +440,8 @@ function drawConnectionHighlights(time = performance.now()) {
     target.strokeStyle = `rgba(177,232,255,${.65 + pulse * .35})`;
     target.fillStyle = `rgba(118,201,237,${.12 + pulse * .18})`;
     target.lineWidth = 2 / state.zoom;
-    target.beginPath(); target.arc(x, y, radius, 0, Math.PI * 2); target.fill(); target.stroke();
-    if ($('connection-labels').checked) {
+    if (highlight) { target.beginPath(); target.arc(x, y, radius, 0, Math.PI * 2); target.fill(); target.stroke(); }
+    if (labels) {
       const up = link.targets.some(t => t.z > link.z), down = link.targets.some(t => t.z < link.z);
       if (!up && !down) continue;
       const size = Math.min(10, Math.max(3, state.zoom * 10)) / state.zoom;
