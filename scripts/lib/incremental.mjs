@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, existsSync, statSync, cpSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync, mkdirSync, linkSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
 
 export const digest = value => createHash('sha256').update(value).digest('hex');
 export function converterDigest(root = '.') {
-  const files = ['scripts/export.mjs', 'pnpm-lock.yaml', 'package.json'];
+  const files = ['scripts/export.mjs', 'scripts/export-parallel.mjs', 'pnpm-lock.yaml', 'package.json'];
   for (const item of readdirSync(path.join(root, 'scripts/lib'))) if (item.endsWith('.mjs')) files.push(`scripts/lib/${item}`);
   return digest(files.sort().map(file => file + '\0' + readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g,'\n')).join('\0'));
 }
@@ -25,8 +25,16 @@ export function completeMap(root, map) {
     });
   } catch { return false; }
 }
-export function reuseMap(baseline, map, destination) {
-  cpSync(path.join(baseline.root, map.id), destination, { recursive: true });
+export function reuseMap(baseline, map, destination,{links=process.env.ATLAS_REUSE_LINKS==='1'}={}) {
+  // Reused map outputs are immutable: hard links avoid copying hundreds of MB
+  // during local generations. Fall back to copying across filesystems.
+  const reuseFile=(source,target)=>{if(links){try{linkSync(source,target);return;}catch{}}copyFileSync(source,target);};
+  const reuseTree=(source,target)=>{mkdirSync(target,{recursive:true});for(const item of readdirSync(source,{withFileTypes:true})){const from=path.join(source,item.name),to=path.join(target,item.name);if(item.isDirectory())reuseTree(from,to);else reuseFile(from,to);}};
+  reuseTree(path.join(baseline.root, map.id),destination);
+  if(map.archive?.version===(map.assetVersion||baseline.manifest.buildId||baseline.manifest.commit)){
+    const source=path.resolve(baseline.root,map.archive.path),target=path.resolve(path.dirname(destination),map.archive.path);
+    if(source.startsWith(path.resolve(baseline.root)+path.sep)&&target.startsWith(path.resolve(path.dirname(destination))+path.sep)&&existsSync(source)&&statSync(source).size===map.archive.bytes){mkdirSync(path.dirname(target),{recursive:true});reuseFile(source,target);}
+  }
   return { ...map, assetVersion: map.assetVersion || baseline.manifest.buildId || baseline.manifest.commit };
 }
 export function canQuickReuse(baseline, map, converter, changed, renderConfig) {

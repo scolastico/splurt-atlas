@@ -1,9 +1,21 @@
 // Deterministic map-load structures and ordinary bitmask smoothing can be
 // resolved statically. Arbitrary Initialize()/update_appearance() code cannot.
+import {transitOverlays} from './transit-appearance.mjs';
 export function expandStructures(atoms, db, depth = 0) {
   if (depth > 8) return atoms;
   return atoms.flatMap(atom => {
     const vars = { ...db.resolve(atom.path), ...atom.vars };
+    if(/^\/obj\/machinery\/duct(?:\/|$)/.test(atom.path)){
+      const literal=value=>db.literal?db.literal(value):value;
+      const color=literal(vars.duct_color||vars.color||''),raw=String(literal(vars.duct_layer||'4')),shift=raw.match(/1\s*<<\s*(\d+)/),layer=shift?2**Number(shift[1]):Number(raw),offset=[1,2,4,8,16].includes(layer)?(Math.log2(layer)-2)*5:0;
+      return[{...atom,vars:{...atom.vars,color,pixel_x:String(offset),pixel_y:String(offset)}}];
+    }
+    if(/^\/obj\/structure\/reflector(?:\/|$)/.test(atom.path)){
+      const base={...atom,vars:{...atom.vars,icon_state:'"reflector_base"',dir:'1'}};
+      if(!vars.deflector_icon_state)return[base];
+      const angle=Number(vars.rotation_angle),rotation=Number.isFinite(angle)&&angle!==-1?angle:({1:0,2:180,4:90,8:270,5:45,6:135,9:315,10:225}[Number(vars.dir)||2]||0);
+      return[base,{...atom,vars:{...atom.vars,dir:'1',icon_state:vars.deflector_icon_state,atlas_rotation:String(rotation)}}];
+    }
     if (atom.path.startsWith('/obj/effect/spawner/structure/')) {
       const paths = vars.spawn_list?.match(/\/obj\/[\w/]+/g);
       if (paths?.length) return expandStructures(paths.map(path => ({ path, vars: {} })), db, depth + 1);
@@ -13,7 +25,7 @@ export function expandStructures(atoms, db, depth = 0) {
       const directions = { north: '1', south: '2', east: '4', west: '8' };
       return [{ path: parent, vars: { ...atom.vars, dir: directions[atom.path.split('/').at(-1)] || '2' } }];
     }
-    return [atom];
+    return [atom,...transitOverlays(atom,db)];
   });
 }
 

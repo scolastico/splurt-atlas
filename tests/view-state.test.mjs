@@ -20,6 +20,8 @@ test('selected tile roundtrips with the camera and rejects malformed coordinates
   assert.deepEqual([...params.keys()],['m','z','x','y','s','t','q','r','f','o']);
   for (const tile of ['0,1,1','256,1,1','1,1,9','1,2,3,4','1.5,2,3','NaN,1,1']) assert.equal(selectedTile(new URLSearchParams({t:tile}),map),null);
   assert.equal(new URLSearchParams(viewFragment({...state,selected:null}).slice(1)).has('t'),false);
+  assert.equal(new URLSearchParams(viewFragment({...state,doorRoles:['Chief Engineer','Security Officer']}).slice(1)).get('j'),'Chief Engineer,Security Officer');
+  assert.equal(new URLSearchParams(viewFragment({...state,offsetHighlights:new Set([8,3])}).slice(1)).get('h'),'3,8');
   const encoded = new URLSearchParams(viewFragment({...state,query:'wrench & cable / Δ'}).slice(1));
   assert.equal(encoded.get('q'),'wrench & cable / Δ');
 });

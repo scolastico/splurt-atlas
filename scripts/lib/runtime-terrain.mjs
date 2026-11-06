@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import {unquote,pretty,classify,aperture} from './dm.mjs';
 import {expandStructures,smoothAtoms} from './appearance.mjs';
 import {writeMipmaps} from './image-pyramid.mjs';
+import {bakedChannel} from './utility-visibility.mjs';
 export function runtimeReplacement(def,area,db){
   if(!/^\/turf\/open\/genturf(?:\/|$)/.test(def.turf))return null;
   const generator=db.resolve(area.path).map_generator;
@@ -17,7 +18,7 @@ export async function bakeRuntimeTerrain(dir,meta,db,reader,S=32,C=16){
   const P=S*C,expanded=meta.definitions.map(def=>expandStructures([...def.atoms.map(a=>({path:a.path,vars:a.vars})),{path:meta.areas[def.area].path,vars:{}}],db)),cache=new Map();
   const num=(v,f)=>Number.isFinite(+v)?+v:f;
   async function tile(atoms){
-    const visible=atoms.filter(a=>!classify(a.path)&&!a.path.startsWith('/area/')&&!/\/landmark|\/spawner\//.test(a.path)),key=JSON.stringify(visible);if(cache.has(key))return cache.get(key);
+    const visible=atoms.filter(a=>bakedChannel(a,atoms,db)==='base'&&!a.path.startsWith('/area/')&&!/\/landmark|\/spawner\//.test(a.path)),key=JSON.stringify(visible);if(cache.has(key))return cache.get(key);
     const parts=[];
     for(const atom of visible){if(/\/space(?:\/|$)|\/openspace(?:\/|$)/.test(atom.path))continue;const v={...db.resolve(atom.path),...atom.vars},icon=unquote(v.icon);if(!icon.endsWith('.dmi'))continue;
       const alpha=Math.min(num(v.alpha,255),atom.path.startsWith('/turf/')&&aperture(atom.path)?255-aperture(atom.path):255),sprite=await reader.sprite(icon,unquote(v.icon_state),num(v.dir,2),unquote(v.color),alpha);if(!sprite)continue;

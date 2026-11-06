@@ -1,6 +1,7 @@
 import './style.css';
 import { detailForZoom, deckScale, selectedTile, viewFragment, optionBits,encodeOptions,decodeOptions } from './view-state.js';
 import { AssetCache } from './asset-cache.js';
+import { indexDoorTiles, doorMarkersForRoles, roleSuggestions, groupDoorAccess } from './door-highlights.js';
 
 const $ = id => document.getElementById(id);
 if (import.meta.env.VITE_ATLAS_SOURCE_URL) { $('atlas-source').href = import.meta.env.VITE_ATLAS_SOURCE_URL; $('atlas-source').hidden = false; }
@@ -10,20 +11,32 @@ let connectionsFrame = 0, lastConnectionsPaint = 0;
 const space = $('space'), background = space.getContext('2d', { alpha: false });
 const scratch = document.createElement('canvas'), sc = scratch.getContext('2d');
 const layer = document.createElement('canvas'), lc = layer.getContext('2d');
-const palette = { pipes: '#68c8b2', power: '#e5bd69', disposal: '#ce8baf', transit: '#80addb' };
-const networkNames = { pipes: 'Atmospherics', power: 'Power cables', disposal: 'Waste disposal', transit: 'Transit tubes' };
+const palette = { pipes: '#68c8b2', power: '#e5bd69', fluid:'#a798e5', disposal: '#ce8baf', transit: '#80addb' };
+const networkNames = { pipes: 'Atmospherics', power: 'Power cables', fluid:'Fluid ducts', disposal: 'Waste disposal', transit: 'Transit tubes' };
 const enabled = new Set(['transit']);
 const base = new URL('./data/', document.baseURI);
 let dataBase = base;
-const assetCache=new AssetCache(base.href,message=>{$('cache-status').textContent=message;});
+const cacheActivity=$('cache-activity');
+cacheActivity.querySelector('small').id='cache-activity-note';
+$('cache-activity-note').insertAdjacentHTML('beforebegin',`<p id="cache-activity-status"></p><div class="cache-progress-label"><span>Current step</span><span id="cache-step-percent"></span></div><progress id="cache-step-progress" max="100" aria-label="Current cache step"></progress><div class="cache-progress-label"><span>Overall</span><span id="cache-overall-percent"></span></div><progress id="cache-overall-progress" max="100" aria-label="Overall cache preparation"></progress><p id="cache-remaining"></p>`);
+function updateCacheStatus(message,info){
+  $('cache-status').textContent=$('cache-activity-status').textContent=message;
+  for(const [kind,value]of [['step',info?.stepPercent],['overall',info?.overallPercent]]){const bar=$('cache-'+kind+'-progress');if(Number.isFinite(value)){bar.value=value;$('cache-'+kind+'-percent').textContent=value+'%';}else{bar.removeAttribute('value');$('cache-'+kind+'-percent').textContent='';}}
+  if(info){const count=info.remainingMaps+' '+(info.remainingMaps===1?'map':'maps')+' left',remaining=(100-info.overallPercent)+'% remaining';let time='Estimating time remaining';if(Number.isFinite(info.remainingSeconds)){const seconds=Math.ceil(info.remainingSeconds),minutes=Math.floor(seconds/60);time='About '+(minutes?minutes+'m ':'')+(seconds%60)+'s remaining';}$('cache-remaining').textContent=remaining+' · '+count+' · '+time;}
+  else $('cache-remaining').textContent='Calculating overall progress...';
+}
+const assetCache=new AssetCache(base.href,updateCacheStatus,(active,info)=>{cacheActivity.hidden=!active;if(active){cacheActivity.querySelector('strong').textContent=info?.currentReady?'Current map is ready':'Preparing offline cache';$('cache-activity-note').textContent=info?.currentReady?'Other maps are still being downloaded and prepared in the background.':'The map may be slower while saving. Unready chunks may look blurry or pixelated.';}});
 $('storage-mode').value=assetCache.mode||'all';
 $('cache-status').textContent=assetCache.enabled?'Preparing offline maps…':'Offline saving is off.';
 const state = { manifest: null, map: null, levels: new Map(), z: 1, zoom: 1, x: 0, y: 0, w: 0, h: 0, dpr: 1, generation: 0, markers: [], selected: null, motion: true, cutaway: true, regions: false, hover: null, searchReady: false };
 let worker, searchSeq = 0, timer, frame = 0, shareTimer, activeRequests = 0;
 let finding = null, findingPage = 0, findingIndex = 0, locationSeq = 0, pulseStart = -Infinity;
 let locationTarget = null;
-let utilityPaths=new Map(),sidebarWidth=320;
+let utilityPaths=new Map(),sidebarWidth=320,sheetHeight=innerHeight*.48;
 let inspectorDetailHTML='';
+let doorTiles=[],doorMarkers=[];
+let suggestedRoles=[],suggestedRoleIndex=0;
+let panelTransitionUntil=0;
 const FINDINGS_PER_PAGE = 30;
 const images = new Map(), queue = [], failures = new Set();
 const CACHE_BYTES = 128 * 1024 * 1024, MAX_REQUESTS = 8;
@@ -35,16 +48,20 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 $('motion').checked = state.motion = !reduced.matches;
 reduced.addEventListener('change', event => { state.motion = $('motion').checked = !event.matches; updateSpaceAnimation(); redraw(); });
 
-function sidebarInset() { return innerWidth > 650 && !document.body.classList.contains('sidebar-collapsed') ? $('sidebar').getBoundingClientRect().width : 0; }
+function sidebarInset() { if(innerWidth<=650)return 0;const rect=$('sidebar').getBoundingClientRect();return Math.max(0,Math.min(rect.width,rect.right)); }
 function screenCenterX() { return (state.w + sidebarInset()) / 2; }
+function portraitPanel(){return matchMedia('(max-width:650px) and (orientation:portrait)').matches;}
+function bottomSidebarInset(){if(!portraitPanel())return 0;const rect=$('sidebar').getBoundingClientRect();return Math.max(0,Math.min(rect.height,innerHeight-rect.top));}
+function screenCenterY(){return (state.h-bottomSidebarInset())*.5;}
 function sidebar(collapsed, persist = true) {
+  const changed=document.body.classList.contains('sidebar-collapsed')!==collapsed;
   document.body.classList.toggle('sidebar-collapsed', collapsed);
   $('sidebar').inert = collapsed;
   $('sidebar-toggle').setAttribute('aria-expanded', String(!collapsed));
   $('sidebar-toggle').setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
   $('sidebar-toggle').title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
-  $('sidebar-toggle').textContent = collapsed ? '›' : '‹';
-  if (persist) { redraw(); try { localStorage.setItem('atlas-sidebar-collapsed', String(collapsed)); } catch {} }
+  $('sidebar-toggle').textContent = portraitPanel()?(collapsed?'↑':'↓'):(collapsed?'›':'‹');
+  if (persist) { if(changed&&!reduced.matches)panelTransitionUntil=performance.now()+260;redraw(); try { localStorage.setItem('atlas-sidebar-collapsed', String(collapsed)); } catch {} }
 }
 let initiallyCollapsed = matchMedia('(max-width:650px)').matches;
 try { const saved = localStorage.getItem('atlas-sidebar-collapsed'); if (saved !== null) initiallyCollapsed = saved === 'true'; } catch {}
@@ -60,35 +77,42 @@ function sidebarView(view) {
 function clearSelection() {
   state.result = null; state.finding = null; locationTarget = null; locationSeq++;
   finding = null; state.markers = []; $('search-findings').hidden = true;
-  state.selected = null; $('inspect-tab').disabled = true; sidebarView(false); redraw(); share();
+  state.selected = null;state.offsetHighlights=new Set();$('inspect-tab').disabled = true; sidebarView(false); redraw(); share();
 }
 $('sidebar-toggle').onclick = () => sidebar(!document.body.classList.contains('sidebar-collapsed'));
 $('explore-tab').onclick = () => sidebarView(false);
 $('search-tab').onclick = () => sidebarView('search');
 $('inspect-tab').onclick = () => { if (state.selected) sidebarView(true); };
 try{sidebarWidth=Number(localStorage.getItem('atlas-sidebar-width'))||320;}catch{}
+try{sheetHeight=Number(localStorage.getItem('atlas-sheet-height'))||sheetHeight;}catch{}
 function applySidebarWidth(value,persist=false){const width=Math.round(Math.max(260,Math.min(value,720,innerWidth-40)));document.documentElement.style.setProperty('--sidebar-width',`${width}px`);$('sidebar-resize').setAttribute('aria-valuenow',width);if(persist){redraw();sidebarWidth=width;try{localStorage.setItem('atlas-sidebar-width',width);}catch{}}}
-applySidebarWidth(sidebarWidth);window.addEventListener('resize',()=>applySidebarWidth(sidebarWidth));
+function applySheetHeight(value,persist=false){const height=Math.round(Math.max(220,Math.min(value,innerHeight-100)));document.documentElement.style.setProperty('--sheet-height',`${height}px`);if(portraitPanel())$('sidebar-resize').setAttribute('aria-valuenow',height);if(persist){sheetHeight=height;try{localStorage.setItem('atlas-sheet-height',height);}catch{}redraw();}}
+function sizeSidebar(){applySidebarWidth(sidebarWidth);applySheetHeight(sheetHeight);$('sidebar-resize').setAttribute('aria-orientation',portraitPanel()?'horizontal':'vertical');$('sidebar-resize').setAttribute('aria-label',portraitPanel()?'Resize bottom panel':'Resize sidebar');sidebar(document.body.classList.contains('sidebar-collapsed'),false);redraw();}
+sizeSidebar();window.addEventListener('resize',sizeSidebar);
 $('sidebar-resize').onpointerdown=event=>{$('sidebar-resize').setPointerCapture(event.pointerId);document.body.classList.add('resizing');};
-$('sidebar-resize').onpointermove=event=>{if($('sidebar-resize').hasPointerCapture(event.pointerId))applySidebarWidth(event.clientX,true);};
+$('sidebar-resize').onpointermove=event=>{if($('sidebar-resize').hasPointerCapture(event.pointerId)){if(portraitPanel())applySheetHeight(innerHeight-event.clientY,true);else applySidebarWidth(event.clientX,true);}};
 $('sidebar-resize').onpointerup=event=>{$('sidebar-resize').releasePointerCapture(event.pointerId);document.body.classList.remove('resizing');};
 $('sidebar-resize').onpointercancel=()=>document.body.classList.remove('resizing');
-$('sidebar-resize').onkeydown=event=>{if(['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();event.stopPropagation();applySidebarWidth(sidebarWidth+(event.key==='ArrowRight'?20:-20),true);}};
-$('sidebar-resize').ondblclick=()=>applySidebarWidth(320,true);
+$('sidebar-resize').onkeydown=event=>{const keys=portraitPanel()?['ArrowDown','ArrowUp']:['ArrowLeft','ArrowRight'];if(keys.includes(event.key)){event.preventDefault();event.stopPropagation();if(portraitPanel())applySheetHeight(sheetHeight+(event.key==='ArrowUp'?20:-20),true);else applySidebarWidth(sidebarWidth+(event.key==='ArrowRight'?20:-20),true);}};
+$('sidebar-resize').ondblclick=()=>{if(portraitPanel())applySheetHeight(innerHeight*.48,true);else applySidebarWidth(320,true);};
 $('storage-mode').onchange=event=>{assetCache.setMode(event.target.value);warmStorage();};
 async function warmStorage(){
   if(!state.manifest)return;
   if(assetCache.enabled)await assetCache.write(`${assetCache.scope}:catalog`,new Blob([JSON.stringify(state.manifest)],{type:'application/json'}));
+  if(assetCache.enabled&&!state.map){$('cache-status').textContent='Choose a map to start preparing offline maps.';return;}
   await assetCache.warm(state.manifest,dataBase);
 }
 function storageSize(bytes){return (bytes/1048576).toFixed(1)+' MB';}
 function updateStorageSizes(){
-  const maps=state.manifest.maps,diskSize=map=>(map.bytes||0)+(map.archive?.bytes||0),sizes=maps.map(diskSize),current=maps.find(map=>map.id===assetCache.currentMap);
-  const range=storageSize(Math.min(...sizes))+' to '+storageSize(Math.max(...sizes));
-  const all=storageSize(sizes.reduce((a,b)=>a+b,0));
-  $('storage-all-size').textContent=all+' for all '+maps.length+' maps';
-  $('storage-current-size').textContent=(current?storageSize(diskSize(current))+' for '+current.name+'; ':'')+range+' depending on the map';
-  $('storage-size').textContent='All maps: '+all+'. Current map only: '+(current?storageSize(diskSize(current))+' now; ':'')+range+' when switching maps. Includes saved ZIPs and extracted assets, plus a small browser storage overhead.';
+  const maps=state.manifest.maps,current=maps.find(map=>map.id===assetCache.currentMap);
+  const describe=(label,size)=>{
+    const sizes=maps.map(size),range=storageSize(Math.min(...sizes))+' to '+storageSize(Math.max(...sizes));
+    return{all:label+': '+storageSize(sizes.reduce((a,b)=>a+b,0)),current:label+': '+(current?storageSize(size(current))+' for '+current.name+'; ':'')+range+' depending on the map'};
+  };
+  const downloadSize=describe('Download size',map=>map.archive?.bytes||map.bytes||0),extractedSize=describe('Extracted size',map=>map.bytes||0);
+  $('storage-all-size').textContent=downloadSize.all+' · '+extractedSize.all+' for all '+maps.length+' maps';
+  $('storage-current-size').textContent=downloadSize.current+' · '+extractedSize.current;
+  $('storage-size').textContent='All maps - '+downloadSize.all+'; '+extractedSize.all+'. Current map only - '+downloadSize.current+'; '+extractedSize.current+'. ZIPs are deleted after extraction. Allow temporary space for one ZIP and a small browser storage overhead.';
   const download=$('download-map');download.hidden=!current?.archive;if(current?.archive){download.href=new URL(current.archive.path,dataBase);download.download=current.id+'.zip';download.textContent='Download '+current.name+' ZIP ('+storageSize(current.archive.bytes)+')';}
 }
 async function chooseStorage(){
@@ -212,7 +236,7 @@ function worldTransform(target, depth = 0) {
   // decks recede and pan at their own rate, while parent aperture masks stay
   // attached to their own deck. No saturated screen-offset approximation.
   const scale = deckScale(state.zoom, depth, state.motion);
-  target.setTransform(state.dpr * scale, 0, 0, state.dpr * scale, state.dpr * (screenCenterX() - state.x * scale), state.dpr * (state.h / 2 - state.y * scale));
+  target.setTransform(state.dpr * scale, 0, 0, state.dpr * scale, state.dpr * (screenCenterX() - state.x * scale), state.dpr * (screenCenterY() - state.y * scale));
 }
 
 function channelImages(z,channel,zoom=state.zoom) {
@@ -222,7 +246,7 @@ function channelImages(z,channel,zoom=state.zoom) {
   const natural=channel==='base'&&$('runtime-terrain').checked;
   const overviewChannel=natural&&data.overviews?.includes('natural')?'natural':channel;
   const scale = deckScale(zoom,state.z-z,state.motion), detail = detailForZoom(zoom);
-  const left = state.x - screenCenterX() / scale - S, top = state.y - state.h / scale / 2 - S;
+  const left = state.x - screenCenterX() / scale - S, top = state.y - screenCenterY() / scale - S;
   const right = left + state.w / scale + S * 2, bottom = top + state.h / scale + S * 2;
   const visible = (data.chunks[channel] || []).filter(([cx, cy]) => !((cx + 1) * chunkSize < left || cx * chunkSize > right || (cy + 1) * chunkSize < top || cy * chunkSize > bottom));
   if (detail === 'overview' && data.overviews?.includes(channel)) {
@@ -238,6 +262,7 @@ function drawChannel(target,z,channel,depth){
   const desired=channelImages(z,channel)||[];if(!desired.length)return;
   worldTransform(target,depth);target.imageSmoothingEnabled=false;
   const loaded=desired.map(item=>({...item,image:image(item.path)}));
+  for(const item of desired)assetCache.priorityPaths?.add(item.path);
   let chosen=loaded.every(item=>item.image)?loaded:null;
   if(!chosen)for(const zoom of [state.zoom/2,state.zoom/4,.01]){
     const fallback=(channelImages(z,channel,zoom)||[]).map(item=>({...item,image:images.get(item.path)?.image}));
@@ -253,17 +278,19 @@ async function prepareView(generation){
     for(const channel of data.overviews||[])paths.add(`${state.map.id}/${z}/${channel}-overview.webp`);
     if(z>state.z)continue;
     for(const zoom of [state.zoom,state.zoom/1.5,state.zoom/2,state.zoom*1.5]){
-      for(const channel of ['base',...(z===state.z?[...enabled]:[])])for(const item of channelImages(z,channel,zoom)||[])paths.add(item.path);
+      for(const channel of ['base','foreground',...(z===state.z?['disposal-surface','pipes-surface','power-surface','fluid-surface',...enabled]:[])])for(const item of channelImages(z,channel,zoom)||[])paths.add(item.path);
     }
   }
-  warmImages=paths;let count=0;
+  warmImages=paths;assetCache.priorityPaths=new Set([`${state.map.id}/map.json`,`${state.map.id}/search.json`,`${state.map.id}/${state.z}.json`,...paths]);let count=0;
   await Promise.all([...paths].map(async path=>{await ensureImage(path).promise;if(generation===state.generation)setLoading(`Preparing smooth zoom · ${++count} / ${paths.size} images`,true,count/paths.size);}));
 }
 
 function render() {
   frame = 0;
+  if(performance.now()<panelTransitionUntil)redraw();
   canvas.dataset.detail=String(detailForZoom(state.zoom));
   frameImages = new Set();
+  if(state.map)assetCache.priorityPaths=new Set([`${state.map.id}/map.json`,`${state.map.id}/search.json`,`${state.map.id}/${state.z}.json`]);
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over';
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawBackground();
@@ -274,7 +301,12 @@ function render() {
   for (const z of levels) {
     lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, layer.width, layer.height);
     drawChannel(lc, z, 'base', state.z - z);
-    if (z === state.z) for (const channel of enabled) if(!($('simple-utilities').checked&&state.map.infrastructure?.nodes?.length&&['power','pipes'].includes(channel)))drawChannel(lc, z, channel, 0);
+    if (z === state.z) for (const channel of ['disposal','pipes','power','fluid','transit']) {
+      if($('simple-utilities').checked&&state.map.infrastructure?.nodes?.length&&['power','pipes'].includes(channel))continue;
+      drawChannel(lc,z,channel+'-surface',0);
+      if(enabled.has(channel))drawChannel(lc,z,channel,0);
+    }
+    drawChannel(lc,z,'foreground',state.z-z);
     if (z !== state.z) {
       // Shade deeper decks without changing their opacity: an opaque middle
       // floor must still occlude deeper floors. Preserve transparent sprite
@@ -300,7 +332,7 @@ function drawInfrastructure(){
     const key=`${state.z}:${simple}:${colored}:${[...enabled].sort()}`;
     if(!utilityPaths.has(key)){
       const paths=new Map();
-      for(const node of data.nodes){if(node.z!==state.z||!enabled.has(node.channel)||(!simple&&!(colored&&node.channel==='power')))continue;
+      for(const node of data.nodes){if(!['power','pipes'].includes(node.channel)||node.z!==state.z||(!enabled.has(node.channel)&&!node.exposed)||(simple&&node.simpleEligible===false&&!(colored&&node.channel==='power'))||(!simple&&!(colored&&node.channel==='power')))continue;
         const color=colored&&node.channel==='power'?`hsl(${node.network*137.508%360} 85% 70%)`:node.color;
         if(!paths.has(color))paths.set(color,new Path2D());const path=paths.get(color),x=(node.x-.5)*32,y=(state.map.height-node.y+.5)*32;
         const ports=simple?15:node.links;
@@ -318,14 +350,33 @@ function drawConnectionHighlights(time = performance.now()) {
   const target = connectionsContext;
   target.setTransform(1, 0, 0, 1, 0, 0);
   target.clearRect(0, 0, connectionsCanvas.width, connectionsCanvas.height);
-  if (!state.ready || !state.map || !$('connections').checked || document.hidden) return false;
+  if (!state.ready || !state.map || document.hidden) return false;
   worldTransform(target);
+  const centerX=screenCenterX(),centerY=screenCenterY();
   const pulse = reduced.matches ? .5 : (1 + Math.sin(time * Math.PI * 2 / 1800)) / 2;
   let visible = false;
-  for (const link of state.map.infrastructure?.transitions || []) {
+  const ring=(tileX,tileY,z,color)=>{
+    if(z!==state.z)return;
+    const x=(tileX-.5)*32,y=(state.map.height-tileY+.5)*32;
+    const sx=(x-state.x)*state.zoom+centerX,sy=(y-state.y)*state.zoom+centerY;
+    if(sx < -30||sx>state.w+30||sy < -30||sy>state.h+30)return;
+    visible=true;target.strokeStyle=`rgba(${color},${.65+pulse*.35})`;target.fillStyle=`rgba(${color},${.08+pulse*.12})`;target.lineWidth=2/state.zoom;
+    target.beginPath();target.arc(x,y,Math.max(13,5/state.zoom)+pulse*3/state.zoom,0,Math.PI*2);target.fill();target.stroke();
+  };
+  for(const marker of doorMarkers)ring(marker.x,marker.y,marker.z,marker.status==='allowed'?'90,226,144':marker.status==='partial'?'255,210,92':'255,105,113');
+  for(let index=0;index<state.markers.length;index+=3)ring(state.markers[index],state.markers[index+1],state.markers[index+2],'255,207,114');
+  if(state.selected?.z===state.z&&state.offsetHighlights?.size){
+    const tile=state.selected,definition=state.map.definitions[state.levels.get(tile.z)?.grid[(state.map.height-tile.y)*state.map.width+tile.x-1]];
+    for(const index of state.offsetHighlights){const bounds=definition?.atoms[index]?.visual;if(!bounds)continue;
+      const x=(tile.x-1)*32+bounds.x,y=(state.map.height-tile.y)*32+bounds.y,cx=x+bounds.width/2,cy=y+bounds.height/2,sx=(cx-state.x)*state.zoom+centerX,sy=(cy-state.y)*state.zoom+centerY;if(sx< -50||sx>state.w+50||sy< -50||sy>state.h+50)continue;
+      visible=true;target.strokeStyle=`rgba(106,224,255,${.65+pulse*.35})`;target.lineWidth=1/state.zoom;target.beginPath();target.moveTo((tile.x-.5)*32,(state.map.height-tile.y+.5)*32);target.lineTo(cx,cy);target.stroke();
+      const padding=(2+pulse*2)/state.zoom;target.fillStyle=`rgba(106,224,255,${.08+pulse*.15})`;target.fillRect(x-padding,y-padding,bounds.width+padding*2,bounds.height+padding*2);target.lineWidth=2/state.zoom;target.strokeRect(x-padding,y-padding,bounds.width+padding*2,bounds.height+padding*2);
+    }
+  }
+  for (const link of $('connections').checked ? state.map.infrastructure?.transitions || [] : []) {
     if (link.z !== state.z) continue;
     const x = (link.x - .5) * 32, y = (state.map.height - link.y + .5) * 32;
-    const screenX = (x - state.x) * state.zoom + screenCenterX(), screenY = (y - state.y) * state.zoom + state.h / 2;
+    const screenX = (x - state.x) * state.zoom + centerX, screenY = (y - state.y) * state.zoom + centerY;
     if (screenX < -400 || screenX > state.w + 30 || screenY < -30 || screenY > state.h + 30) continue;
     visible = true;
     const radius = Math.max(13, 5 / state.zoom) + pulse * 3 / state.zoom;
@@ -372,9 +423,9 @@ function drawAnnotations() {
   const map = state.map, data = state.levels.get(state.z); if (!data) return;
   worldTransform(ctx); ctx.lineWidth = 1 / state.zoom;
   const left = Math.max(0, Math.floor((state.x - screenCenterX() / state.zoom) / 32));
-  const top = Math.max(0, Math.floor((state.y - state.h / state.zoom / 2) / 32));
+  const top = Math.max(0, Math.floor((state.y - screenCenterY() / state.zoom) / 32));
   const right = Math.min(map.width, Math.ceil((state.x + (state.w - screenCenterX()) / state.zoom) / 32));
-  const bottom = Math.min(map.height, Math.ceil((state.y + state.h / state.zoom / 2) / 32));
+  const bottom = Math.min(map.height, Math.ceil((state.y + (state.h-screenCenterY()) / state.zoom) / 32));
   if (state.regions) {
     const labels = new Map();
     for (let y = top; y < bottom; y++) for (let x = left; x < right; x++) {
@@ -394,13 +445,7 @@ function drawAnnotations() {
     }
   }
   ctx.globalAlpha = 1;
-  ctx.strokeStyle = '#ffcf72'; ctx.fillStyle = '#f4c36d55'; ctx.lineWidth = 2 / state.zoom;
-  for (let p = 0; p < state.markers.length; p += 3) {
-    const [x, y, z] = state.markers.slice(p, p + 3); if (z !== state.z) continue;
-    const px = (x - .5) * 32, py = (map.height - y + .5) * 32;
-    if (px < left * 32 || px > right * 32 || py < top * 32 || py > bottom * 32) continue;
-    ctx.beginPath(); ctx.arc(px, py, Math.max(13, 4 / state.zoom), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  }
+  ctx.lineWidth = 2 / state.zoom;
   if (state.selected?.z === state.z) {
     const elapsed = performance.now() - pulseStart;
     const pulse = !reduced.matches && elapsed < 1400 ? .5 + Math.sin(elapsed / 75) * .5 : 0;
@@ -430,12 +475,12 @@ function fit() {
   }
   if (maxX <= minX) { minX = minY = 0; maxX = map.width; maxY = map.height; }
   state.x = (minX + maxX) * 16; state.y = (minY + maxY) * 16;
-  state.zoom = Math.max(.05, Math.min((state.w - sidebarInset() - 130) / ((maxX - minX) * 32), (state.h - 180) / ((maxY - minY) * 32), 1));
+  state.zoom = Math.max(.05, Math.min((state.w - sidebarInset() - 130) / ((maxX - minX) * 32), (state.h - bottomSidebarInset() - (portraitPanel()?90:180)) / ((maxY - minY) * 32), 1));
   redraw(); share();
 }
-function zoom(factor, sx = screenCenterX(), sy = state.h / 2) {
+function zoom(factor, sx = screenCenterX(), sy = screenCenterY()) {
   const before = state.zoom, after = Math.min(5, Math.max(.04, before * factor));
-  state.x += (sx - screenCenterX()) * (1 / before - 1 / after); state.y += (sy - state.h / 2) * (1 / before - 1 / after); state.zoom = after;
+  state.x += (sx - screenCenterX()) * (1 / before - 1 / after); state.y += (sy - screenCenterY()) * (1 / before - 1 / after); state.zoom = after;
   redraw(); share();
 }
 function share() {
@@ -448,7 +493,7 @@ function share() {
 function restoreOptions(params){
   if(!params.has('o'))return false;const options=decodeOptions(params.get('o'));if(!options)return false;
   for(const [key,value]of Object.entries(options))$(key).checked=value;
-  for(const key of ['pipes','power','disposal','transit'])options[key]?enabled.add(key):enabled.delete(key);
+  for(const key of Object.keys(palette))options[key]?enabled.add(key):enabled.delete(key);
   for(const key of ['regions','cutaway','motion'])state[key]=options[key];
   updateSpaceAnimation();utilityPaths.clear();return true;
 }
@@ -463,6 +508,7 @@ async function loadStation(id, restore = false) {
   const restoreTarget = restore && params.get('r') ? { id: params.get('r'), index: Math.max(0, (Number(params.get('f')) || 1) - 1), tile: params.get('t') } : null;
   state.result = null; state.finding = null; locationTarget = null;
   $('search').value = state.query = restore ? params.get('q') || '' : $('search').value;
+  updateSearchReset();
   state.placed = $('placed').checked; state.possible = $('possible').checked;
   loadAbort?.abort(); loadAbort = new AbortController();
   state.map = null; state.levels.clear(); state.markers = []; state.selected = null; images.clear();for(const pending of queue)pending.entry.resolve(null);queue.length=0; failures.clear();
@@ -475,6 +521,11 @@ async function loadStation(id, restore = false) {
     const levelData = await Promise.all(meta.levels.map(z => json(`${id}/${z}.json`, signal)));
     if (generation !== state.generation) return;
     state.map = meta; state.levels = new Map(levelData.map(level => [level.z, level]));
+    doorTiles=indexDoorTiles(meta,state.levels);
+    const requestedRoles=restore?(params.get('j')||'').split(','):state.doorRoles||[];
+    state.doorRoles=[...new Set(requestedRoles.filter(role=>(meta.jobRoles||[]).includes(role)))];
+    $('door-role-input').disabled=!(meta.jobRoles?.length);$('door-role-input').value='';$('door-role-suggestions').hidden=true;
+    renderDoorRoles();doorMarkers=doorMarkersForRoles(doorTiles,state.doorRoles);
     $('network-summary').textContent=meta.infrastructure?`${meta.infrastructure.powerNetworks} separate mapped power networks. Colors describe wired connectivity before a round starts.`:'';
     const requestedZ = restore ? +params.get('z') : meta.levels.at(-1);
     state.z = meta.levels.includes(requestedZ) ? requestedZ : meta.levels.at(-1);
@@ -490,7 +541,7 @@ async function loadStation(id, restore = false) {
       state.x = Math.max(0, Math.min(meta.width * 32, +params.get('x'))); state.y = Math.max(0, Math.min(meta.height * 32, +params.get('y'))); state.zoom = Math.max(.04, Math.min(5, +params.get('s'))); redraw();
     }
     const tile = restore ? selectedTile(params, meta) : null;
-    if (tile) { if (state.z !== tile.z) setDeck(tile.z); inspect(tile.x, tile.y, tile.z); }
+    if (tile) { if (state.z !== tile.z) setDeck(tile.z); inspect(tile.x, tile.y, tile.z,null,(params.get('h')||'').split(',').filter(value=>/^\d+$/.test(value)).map(Number)); }
     const restoreVersion = locationSeq;
     let resolveIndex;const indexReady=new Promise(resolve=>resolveIndex=resolve);
     worker?.terminate(); worker = new Worker(new URL('./search.worker.js', import.meta.url), { type: 'module' });
@@ -535,7 +586,9 @@ function setDeck(z) {
   $('coords').textContent = `DECK ${z} / DRAG TO EXPLORE`; redraw(); share();
 }
 
+function updateSearchReset(){$('reset-search').hidden=!$('search').value.length;}
 function runSearch() {
+  updateSearchReset();
   searchSeq++;
   state.query = $('search').value; state.placed = $('placed').checked; state.possible = $('possible').checked; share();
   if (!state.searchReady) return;
@@ -584,10 +637,12 @@ function showFindings() {
   panel.querySelector('.next').onclick = () => { findingPage++; showFindings(); };
   panel.hidden = false;
 }
-function inspect(x, y, z = state.z, result = null) {
+function inspect(x, y, z = state.z, result = null, highlights = undefined) {
   if (!state.map) return;
   const meta = state.map, def = meta.definitions[state.levels.get(z)?.grid[(meta.height - y) * meta.width + x - 1]];
   if (!def || x < 1 || x > meta.width || y < 1 || y > meta.height) return;
+  const same=state.selected?.x===x&&state.selected?.y===y&&state.selected?.z===z;
+  if(highlights!==undefined)state.offsetHighlights=new Set(highlights.filter(index=>Number.isInteger(index)&&def.atoms[index]?.visual));else if(!same)state.offsetHighlights=new Set();
   const area = meta.areas[def.area]; state.selected = { x, y, z };
   if (!result) { finding = null; state.markers = []; state.result = null; state.finding = null; locationSeq++; $('search-findings').hidden = true; }
   pulseStart = performance.now();
@@ -617,7 +672,8 @@ function paintInspector(){
     const random=!!def.runtimeTerrain||def.atoms.some(a=>a.path.includes('/spawner/')||a.path.includes('/random'));
     $('inspector').innerHTML=`<button class="close" aria-label="Close inspector">×</button><span class="tiny-label">DECK ${z} · ${x}, ${y}</span><h3>${escape(area.name)}</h3><p class="friendly-description">${escape(clean(shownTurf?.name)||'Station surface')}${clean(shownTurf?.description)?`. ${escape(clean(shownTurf.description))}`:''}</p>${inspectedResult?`<p class="friendly-description">Selected finding: <strong>${escape(inspectedResult.name)}</strong></p>`:''}<h4 class="info-heading">What’s here</h4>${here.length?`<ul class="friendly-list">${list(here)}</ul>`:'<p class="info-empty">No objects are placed on this tile.</p>'}<h4 class="info-heading">What could appear</h4>${tileCandidates.length?`<p class="friendly-description">One or more of these may be chosen when the round begins.</p><ul class="friendly-list">${list(tileCandidates)}</ul>`:`<p class="info-empty">${random?'Random objects may appear here. Their exact contents are decided when the round starts.':'No random item spawns are recorded here.'}</p>`}${cables.length?`<h4 class="info-heading">Electricity</h4><p class="friendly-description">${[...new Set(cables.map(n=>`Power network ${n.network}`))].join(', ')}. Matching network colors indicate connected wiring.</p>`:''}${links.length?`<h4 class="info-heading">Where this leads</h4>${links.map(link=>`<p class="friendly-description">${escape(link.kind)}: ${link.targets.length?link.targets.map(t=>`Deck ${t.z} - ${escape(t.room)}`).join('; '):'No destination is mapped in this station.'}</p>`).join('')}`:''}`;
   }
-  for(const door of def.atoms.filter(atom=>atom.doorAccess)){
+  const doors=def.atoms.filter(atom=>atom.doorAccess);
+  for(const door of $('detailed-view').checked?doors:groupDoorAccess(doors)){
     const access=door.doorAccess,section=document.createElement('section');
     const denied=(meta.jobRoles||[]).filter(role=>!access.roles.includes(role));
     let allowedText,deniedText;
@@ -632,15 +688,31 @@ function paintInspector(){
       deniedText=meta.jobRoles?.length?(denied.length?denied.join(', ')+'.':'No standard crew roles are excluded.'):'The complete crew role list is unavailable.';
     }
     section.innerHTML=`<h4 class="info-heading">Who can open ${escape(door.name)}</h4><p class="friendly-description">${escape(allowedText)}</p><h4 class="info-heading">Who can NOT open ${escape(door.name)}</h4><p class="friendly-description">${escape(deniedText)}</p>${access.expandedRoles?.length?`<p class="friendly-description">With expanded departmental access, it can also open for: ${escape(access.expandedRoles.join(', '))}.</p>`:''}${access.kind==='restricted'?'<p class="helper-text">Both lists use normal starting ID access. Access granted or changed during a round can differ.</p>':''}`;
+    const controls=(meta.doorControls||[]).filter(control=>(door.controlKeys||[]).some(key=>key.kind===control.kind&&key.id===control.id)&&(!control.range||(control.z===z&&Math.max(Math.abs(control.x-x),Math.abs(control.y-y))<=control.range)));
+    if(controls.length){const heading=document.createElement('h4');heading.className='info-heading';heading.textContent='Buttons & controls for '+door.name;section.append(heading);for(const control of controls){const link=document.createElement('a');link.className='door-control-link';link.textContent=`${control.name} - Deck ${control.z} · ${control.x}, ${control.y}`;link.href=viewFragment({...state,z:control.z,x:(control.x-.5)*32,y:(meta.height-control.y+.5)*32,zoom:Math.max(state.zoom,1),selected:control,result:null,finding:null,offsetHighlights:new Set([control.atomIndex])});link.onclick=event=>{if(event.ctrlKey||event.metaKey||event.shiftKey)return;event.preventDefault();setDeck(control.z);state.x=(control.x-.5)*32;state.y=(meta.height-control.y+.5)*32;state.zoom=Math.max(state.zoom,1);inspect(control.x,control.y,control.z,null,[control.atomIndex]);redraw();share();};section.append(link);}}
+    else if(access.kind==='remote'){const note=document.createElement('p');note.className='helper-text';note.textContent='No matching button is recorded in this station snapshot.';section.append(note);}
+    if($('detailed-view').checked){
+      const sourceLink=file=>`<a href="${escape(`${state.manifest.repository.replace(/\.git$/,'')}/blob/${state.manifest.commit}/${file}`)}" target="_blank" rel="noreferrer">${escape(file)} ↗</a>`;
+      const declaration=item=>`<li><code>${escape(item.type)}<br>${escape(item.property)} = ${escape(item.value)}</code><br>${item.mapped?'Mapped override: '+meta.files.map(sourceLink).join('<br>'):sourceLink(item.file)}</li>`;
+      const sources=access.sources,provenance=document.createElement('details');provenance.className='access-provenance';
+      const roles=Object.entries(meta.jobRoleSources||{});
+      provenance.innerHTML=`<summary>Access rules &amp; source data</summary><pre>${escape(JSON.stringify({kind:access.kind,all:access.all||[],any:access.any||[],normalRoles:access.roles,expandedRoles:access.expandedRoles},null,2))}</pre><h4>Door requirements</h4>${sources?.requirements?.length?'<ul>'+sources.requirements.map(declaration).join('')+'</ul>':'<p>No static requirement declaration was recorded.</p>'}<h4>Mapped access helpers</h4>${sources?.helpers?.length?'<ul>'+sources.helpers.map(helper=>`<li><code>${escape(helper.mappedType)}<br>${escape(helper.type+'/'+helper.method)}<br>${escape(helper.access.join(', '))}</code><br>${sourceLink(helper.file)}</li>`).join('')+'</ul>':'<p>No mapped access helper was recorded.</p>'}<details><summary>Job ID access definitions (${roles.length})</summary>${roles.map(([role,source])=>`<h4>${escape(role)}</h4><code>${escape(source.type)}</code><ul>${source.declarations.map(declaration).join('')}</ul>${Object.keys(source.mapChanges||{}).length?`<pre>${escape(JSON.stringify(source.mapChanges,null,2))}</pre>${sourceLink('_maps/'+meta.id+'.json')}`:''}`).join('')}</details>`;
+      section.append(provenance);
+    }
     $('inspector').append(section);
   }
   if(!$('detailed-view').checked&&def.runtimeTerrain&&$('runtime-terrain').checked){const note=document.createElement('p');note.className='helper-text';note.textContent='Representative terrain preview. The exact landscape is generated when each round starts.';$('inspector').append(note);}
+  const offsetObjects=def.atoms.map((atom,index)=>({atom,index})).filter(({atom})=>atom.visual);
+  if(offsetObjects.length){const section=document.createElement('section');section.className='offset-objects';section.innerHTML='<h4 class="info-heading">Objects drawn beside this tile</h4><p class="helper-text">Highlight the actual position of each wall-mounted or offset object.</p>';
+    for(const {atom,index}of offsetObjects){const label=document.createElement('label');label.className='toggle-row';const text=document.createElement('span');text.textContent=atom.name;const input=document.createElement('input');input.type='checkbox';input.dataset.objectIndex=index;input.setAttribute('aria-label','Highlight '+atom.name);input.checked=state.offsetHighlights?.has(index)||false;input.onchange=()=>{state.offsetHighlights||=new Set();input.checked?state.offsetHighlights.add(index):state.offsetHighlights.delete(index);redraw();share();};label.append(text,input);section.append(label);}$('inspector').append(section);
+  }
   $('inspector').querySelector('.close').onclick=clearSelection;
 }
 $('detailed-view').onchange=paintInspector;
 
-const pointers = new Map(); let dragged = false, down = null, pinchDistance = 0;
+const pointers = new Map(); let dragged = false, down = null, pinchDistance = 0, tapCandidate = null;
 canvas.onpointerdown = event => {
+  tapCandidate=null;
   canvas.focus(); canvas.setPointerCapture(event.pointerId); pointers.set(event.pointerId, [event.clientX, event.clientY]);
   down = [event.clientX, event.clientY]; dragged = false;
   if (pointers.size === 2) { const p = [...pointers.values()]; pinchDistance = Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]); dragged = true; }
@@ -649,7 +721,7 @@ canvas.onpointermove = event => {
   const rect = canvas.getBoundingClientRect(), sx = event.clientX - rect.left, sy = event.clientY - rect.top;
   if (state.map) {
     const x = Math.floor((state.x + (sx - screenCenterX()) / state.zoom) / 32) + 1;
-    const y = state.map.height - Math.floor((state.y + (sy - state.h / 2) / state.zoom) / 32);
+    const y = state.map.height - Math.floor((state.y + (sy - screenCenterY()) / state.zoom) / 32);
     $('coords').textContent = `X ${x} / Y ${y} / Z ${state.z}`;
   }
   const previous = pointers.get(event.pointerId); if (!previous) return;
@@ -667,18 +739,43 @@ canvas.onpointerup = event => {
   if (!dragged && !pointers.size && state.map) {
     const rect = canvas.getBoundingClientRect();
     const x = Math.floor((state.x + (event.clientX - rect.left - screenCenterX()) / state.zoom) / 32) + 1;
-    const y = state.map.height - Math.floor((state.y + (event.clientY - rect.top - state.h / 2) / state.zoom) / 32);
-    inspect(x, y);
+    const y = state.map.height - Math.floor((state.y + (event.clientY - rect.top - screenCenterY()) / state.zoom) / 32);
+    tapCandidate={x,y,generation:state.generation};
   }
   if (!pointers.size) down = null;
 };
-canvas.onpointercancel = event => { pointers.delete(event.pointerId); dragged = true; };
+// Open the sidebar during the completed click, not pointerup. Touch browsers
+// otherwise deliver the same tap's click to a newly revealed checkbox.
+canvas.onclick=event=>{const tile=tapCandidate;tapCandidate=null;if(tile&&tile.generation===state.generation){event.preventDefault();event.stopPropagation();inspect(tile.x,tile.y);}};
+canvas.onpointercancel = event => { pointers.delete(event.pointerId); dragged = true;tapCandidate=null;if(!pointers.size)down=null; };
 canvas.addEventListener('wheel', event => { event.preventDefault(); const rect = canvas.getBoundingClientRect(); zoom(Math.exp(-event.deltaY * .0015), event.clientX - rect.left, event.clientY - rect.top); }, { passive: false });
 canvas.ondblclick = event => { const rect = canvas.getBoundingClientRect(); zoom(1.8, event.clientX - rect.left, event.clientY - rect.top); };
 $('zoom-in').onclick = () => zoom(1.5); $('zoom-out').onclick = () => zoom(1 / 1.5); $('fit').onclick = fit;
 $('station').onchange = event => event.target.value?loadStation(event.target.value):showMapPicker();
+function renderDoorRoles(){
+  const list=$('door-role-tags');list.replaceChildren();
+  for(const role of state.doorRoles||[]){const tag=document.createElement('button');tag.type='button';tag.className='role-tag';tag.textContent=role+' ×';tag.setAttribute('aria-label','Remove '+role);tag.onclick=()=>changeDoorRoles(state.doorRoles.filter(item=>item!==role));list.append(tag);}
+  $('clear-door-roles').hidden=!state.doorRoles?.length;
+}
+function changeDoorRoles(roles){state.doorRoles=roles;doorMarkers=doorMarkersForRoles(doorTiles,roles);renderDoorRoles();const input=$('door-role-input');input.value='';input.focus();$('door-role-suggestions').hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');suggestedRoles=[];suggestedRoleIndex=0;redraw();share();}
+function showRoleSuggestions(){
+  const input=$('door-role-input'),list=$('door-role-suggestions');suggestedRoles=roleSuggestions(state.map?.jobRoles||[],input.value,state.doorRoles||[]);suggestedRoleIndex=0;list.replaceChildren();
+  for(const [index,role]of suggestedRoles.entries()){const button=document.createElement('button');button.type='button';button.id='role-suggestion-'+index;button.setAttribute('role','option');button.setAttribute('aria-selected',String(index===0));button.textContent=role;button.onpointerdown=event=>event.preventDefault();button.onclick=()=>changeDoorRoles([...(state.doorRoles||[]),role]);list.append(button);}
+  list.hidden=!suggestedRoles.length;input.setAttribute('aria-expanded',String(!list.hidden));if(suggestedRoles.length)input.setAttribute('aria-activedescendant','role-suggestion-0');else input.removeAttribute('aria-activedescendant');
+}
+$('door-role-input').oninput=showRoleSuggestions;$('door-role-input').onfocus=showRoleSuggestions;$('door-role-input').onclick=showRoleSuggestions;
+$('door-role-input').onblur=()=>{$('door-role-suggestions').hidden=true;$('door-role-input').setAttribute('aria-expanded','false');$('door-role-input').removeAttribute('aria-activedescendant');};
+$('door-role-input').onkeydown=event=>{
+  if(['ArrowDown','ArrowUp','Enter','Escape'].includes(event.key)){event.preventDefault();event.stopPropagation();
+    if(event.key==='Escape'){$('door-role-input').blur();return;}
+    if(event.key==='Enter'){if(!$('door-role-suggestions').hidden&&suggestedRoles[suggestedRoleIndex])changeDoorRoles([...(state.doorRoles||[]),suggestedRoles[suggestedRoleIndex]]);return;}
+    if(!suggestedRoles.length)return;suggestedRoleIndex=(suggestedRoleIndex+(event.key==='ArrowDown'?1:-1)+suggestedRoles.length)%suggestedRoles.length;
+    for(const [index,button]of [...$('door-role-suggestions').children].entries())button.setAttribute('aria-selected',String(index===suggestedRoleIndex));$('door-role-input').setAttribute('aria-activedescendant','role-suggestion-'+suggestedRoleIndex);
+  }else if(event.key==='Backspace'&&!$('door-role-input').value&&state.doorRoles?.length){event.preventDefault();changeDoorRoles(state.doorRoles.slice(0,-1));}
+};
+$('clear-door-roles').onclick=()=>changeDoorRoles([]);
 for (const key of ['regions', 'cutaway', 'motion']) $(key).onchange = event => { state[key] = event.target.checked; if (key === 'motion') updateSpaceAnimation(); redraw(); };
-$('search').oninput = () => { clearTimeout(timer); searchSeq++; state.query = $('search').value; share(); timer = setTimeout(runSearch, 130); };
+$('search').oninput = () => { updateSearchReset();clearTimeout(timer); searchSeq++; state.query = $('search').value; share(); timer = setTimeout(runSearch, 130); };
 $('reset-search').onclick = () => {
   clearTimeout(timer); $('search').value = ''; searchSeq++; locationSeq++;
   locationTarget = null; finding = null; state.result = null; state.finding = null;
@@ -716,7 +813,6 @@ function showMapPicker(){
     const button=document.createElement('button');button.className='map-card';button.innerHTML=`${map.preview===null?'<div class="map-preview-empty">Preview unavailable</div>':'<img alt="" loading="lazy">'}<strong>${escape(map.name)}</strong><small>${map.levels.length} ${map.levels.length===1?'deck':'decks'} · ${map.width} × ${map.height} tiles</small>`;
     button.onclick=()=>{$('station').value=map.id;loadStation(map.id);};
     const card=document.createElement('div');card.className='map-card-entry';card.append(button);
-    if(map.archive){const download=document.createElement('a');download.className='map-download';download.href=new URL(map.archive.path,dataBase);download.download=map.id+'.zip';download.textContent='Download ZIP ('+storageSize(map.archive.bytes)+')';card.append(download);}
     $('map-cards').append(card);
     if(map.preview===null)continue;
     const path=($('runtime-terrain').checked&&map.naturalPreview)||map.preview||`${map.id}/${map.levels.at(-1)}/base-overview.webp`;

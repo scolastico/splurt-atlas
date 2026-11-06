@@ -16,7 +16,8 @@
     "build": "node scripts/check-data.mjs && node scripts/package-maps.mjs && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.mjs",
-    "package:maps": "node scripts/package-maps.mjs"
+    "package:maps": "node scripts/package-maps.mjs",
+    "audit:offsets": "node scripts/audit-offsets.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.58.0",

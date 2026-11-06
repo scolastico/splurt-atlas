@@ -3,9 +3,9 @@ import JSZip from 'jszip';
 export const assetMime=path=>path.endsWith('.json')?'application/json':path.endsWith('.webp')?'image/webp':path.endsWith('.png')?'image/png':'application/octet-stream';
 
 // Bounded batches keep the archive plus a few extracted blobs in memory.
-export async function extractArchive(blob,onBatch,shouldStop=()=>false){
+export async function extractArchive(blob,onBatch,shouldStop=()=>false,priorities=[]){
   const zip=await JSZip.loadAsync(await blob.arrayBuffer());
-  const entries=Object.values(zip.files).filter(entry=>!entry.dir);
+  const preferred=new Set(priorities),entries=Object.values(zip.files).filter(entry=>!entry.dir).sort((a,b)=>Number(preferred.has(b.name))-Number(preferred.has(a.name)));
   for(const entry of entries){
     const name=entry.unsafeOriginalName||entry.name;
     if(name!==entry.name||name.startsWith('/')||name.includes('\\')||name.split('/').some(part=>!part||part==='.'||part==='..'))throw new Error('Invalid archive path');

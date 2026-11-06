@@ -10,7 +10,7 @@ try{
  const target=new URL(url);target.hash='m=tramstation';await page.goto(target.href);
  await page.locator('#storage-dialog').waitFor({state:'visible'});
  assert.equal(await page.locator('[data-storage-mode]').count(),3);
- const estimate=await page.locator('#storage-current-size').textContent();assert.match(estimate,/MB for Tramstation; \d+\.\d+ MB to \d+\.\d+ MB/);assert.ok(!estimate.includes('?'));
+ const estimate=await page.locator('#storage-current-size').textContent();assert.match(estimate,/Download size: .*MB for Tramstation; \d+\.\d+ MB to \d+\.\d+ MB/);assert.match(estimate,/Extracted size: /);assert.ok(!estimate.includes('?'));
  assert.match(await page.locator('#storage-all-size').textContent(),/MB for all 16 maps/);
  assert.deepEqual(await savedKeys(),[],'No map download before the storage choice');
  mkdirSync('.cache/qa',{recursive:true});await page.screenshot({path:'.cache/qa/storage-choice.png'});
@@ -20,7 +20,7 @@ try{
  await page.locator('#station').selectOption('biodome');await page.locator('#loading').waitFor({state:'hidden',timeout:120000});
  await page.waitForFunction(()=>document.querySelector('#cache-status').textContent.startsWith('Current map saved'),{},{timeout:180000});
  const second=await savedKeys();assert.ok(second.length>100);assert.ok(second.every(key=>key.endsWith(':catalog')||key.includes(':biodome/')),'Switching maps replaces the previous map');
- assert.match(await page.locator('#storage-size').textContent(),/MB now; .* MB to .* MB when switching maps/);
+ assert.match(await page.locator('#storage-size').textContent(),/Extracted size: .*MB for Biodome; .*MB to .*MB depending on the map/);
  await page.reload();await page.locator('#loading').waitFor({state:'hidden',timeout:120000});assert.equal(await page.locator('#storage-dialog').isVisible(),false);assert.equal(await page.locator('#storage-mode').inputValue(),'current');
  await page.locator('#regions').check();await page.waitForTimeout(250);const before=page.url();
  await page.locator('#storage-mode').selectOption('none');await page.waitForTimeout(250);assert.equal(page.url(),before,'Changing local storage mode must not change shared URLs');

@@ -43,6 +43,11 @@ test('deterministic structure spawners expand into rendered window and grille', 
   const result = expandStructures([{ path: '/obj/effect/spawner/structure/window', vars: {} }], db);
   assert.deepEqual(result.map(a => a.path), ['/obj/structure/grille', '/obj/structure/window/fulltile']);
 });
+test('reflectors use their actual mirror/box overlays and fluid ducts keep their assigned color',()=>{
+ const db={resolve:path=>path.includes('reflector')?{deflector_icon_state:'"reflector_double"',rotation_angle:'-1'}:{duct_color:'"#00ff00"',duct_layer:'(1<<3)'},literal:value=>value};
+ const mirror=expandStructures([{path:'/obj/structure/reflector/double/anchored',vars:{dir:'5'}}],db);assert.equal(mirror[0].vars.icon_state,'"reflector_base"');assert.equal(mirror[1].vars.icon_state,'"reflector_double"');assert.equal(mirror[1].vars.atlas_rotation,'45');
+ const duct=expandStructures([{path:'/obj/machinery/duct',vars:{}}],db)[0];assert.equal(duct.vars.color,'"#00ff00"');assert.equal(duct.vars.pixel_x,'5');
+});
 test('smoothing uses BYOND north and only fills diagonals with both cardinal neighbors', () => {
   const db = { resolve: () => ({ icon_state: '"wall-0"', smoothing_flags: 'SMOOTH_BITMASK', canSmoothWith: 'SMOOTH_GROUP_WALLS', smoothing_groups: 'SMOOTH_GROUP_WALLS' }) };
   const atom = { path: '/turf/closed/wall', vars: {} };

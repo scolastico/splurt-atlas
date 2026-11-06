@@ -1,20 +1,22 @@
 import {unquote,pretty} from './dm.mjs';
+import path from 'node:path';
 export function createDoorResolver(db,mapChanges={}){
-  const values=new Map(),helpers=new Map();
-  for(const [,text]of db.files||[]){
+  const values=new Map(),helpers=new Map(),helperSources=new Map();
+  for(const [file,text]of db.files||[]){
     for(const m of text.matchAll(/^\s*#define\s+(ACCESS_\w+)\s+"([^"]+)"/gm))values.set(m[2],m[1]);
-    for(const m of text.matchAll(/^(\/obj\/effect\/mapping_helpers\/airlock\/access\/[\w/]+)\/get_access\(\)([\s\S]*?)(?=^\/|$(?![\s\S]))/gm))helpers.set(m[1],[...new Set(m[2].match(/\bACCESS_(?!FLAG_)\w+/g)||[])]);
+    for(const m of text.matchAll(/^(\/obj\/effect\/mapping_helpers\/airlock\/access\/[\w/]+)\/get_access\(\)([\s\S]*?)(?=^\/|$(?![\s\S]))/gm)){const access=[...new Set(m[2].match(/\bACCESS_(?!FLAG_)\w+/g)||[])];helpers.set(m[1],access);helperSources.set(m[1],{type:m[1],file:db.root?path.relative(db.root,file).replaceAll('\\','/'):file,method:'get_access()',access});}
   }
   const canonical=value=>unquote(db.literal(value));
   const tokens=value=>[...new Set([...(String(value||'').match(/\bACCESS_(?!FLAG_)\w+/g)||[]),...[...String(value||'').matchAll(/"([^"]+)"/g)].flatMap(m=>values.has(m[1])?[values.get(m[1])]:[])].map(canonical))];
   const helper=path=>{const result=[];while(path){result.push(...(helpers.get(path)||[]));path=path.slice(0,path.lastIndexOf('/'));}return [...new Set(result.map(canonical))];};
-  const roles=[];
+  const roles=[],roleSources={};
   for(const [path]of db.types)if(/^\/datum\/id_trim\/job\/[^/]+$/.test(path)){
     const v=db.resolve(path),job=db.resolve(v.job||''),name=unquote(db.literal(v.assignment||job.title||''))||pretty(path);
     if(!name||name.includes('JOB_'))continue;
     const changes=mapChanges[name]||{},minimal=new Set([...tokens(v.minimal_access),...tokens(v.minimal_wildcard_access),...tokens(v.access),...tokens(JSON.stringify(changes.additional_minimal_access||[]))]);
     const expanded=new Set([...minimal,...tokens(v.extra_access),...tokens(v.extra_wildcard_access),...tokens(JSON.stringify(changes.additional_access||[]))]);
     roles.push({name,minimal,expanded,captain:path==='/datum/id_trim/job/captain'});
+    roleSources[name]={type:path,declarations:['minimal_access','minimal_wildcard_access','access','extra_access','extra_wildcard_access'].map(property=>db.sourceFor?.(path,property)).filter(Boolean),mapChanges:changes};
   }
   const match=(role,set,all,any)=>{
     const has=access=>set.has(access)||(role.captain&&!/SYNDICATE|BLOODCULT|CENTCOM|AWAY|WIZARD|PIRATE/i.test(access));
@@ -22,6 +24,11 @@ export function createDoorResolver(db,mapChanges={}){
   };
   const resolveDoor=(atoms,door)=>{
     const v={...db.resolve(door.path),...door.vars};
+    const sources={requirements:['req_access','req_one_access','req_access_txt','req_one_access_txt'].map(property=>Object.hasOwn(door.vars,property)?{type:door.path,property,value:door.vars[property],mapped:true}:db.sourceFor?.(door.path,property)).filter(Boolean),helpers:[]};
+    for(const atom of atoms.filter(atom=>atom.path.startsWith('/obj/effect/mapping_helpers/airlock/access/'))){let type=atom.path;while(type){if(helperSources.has(type))sources.helpers.push({...helperSources.get(type),mappedType:atom.path});type=type.slice(0,type.lastIndexOf('/'));}}
+    const result=resolveRequirements(atoms,door,v);return sources.requirements.length||sources.helpers.length?{...result,sources}:result;
+  };
+  const resolveRequirements=(atoms,door,v)=>{
     if(/\/poddoor(?:\/|$)/.test(door.path))return {kind:'remote',roles:[],expandedRoles:[]};
     const all=tokens(v.req_access),any=tokens(v.req_one_access);let unresolved=false;
     for(const atom of atoms)if(atom.path.startsWith('/obj/effect/mapping_helpers/airlock/access/')){const access=helper(atom.path);if(!access.length)unresolved=true;(atom.path.includes('/access/any/')?any:all).push(...access);}
@@ -35,5 +42,6 @@ export function createDoorResolver(db,mapChanges={}){
     return{kind:'restricted',roles:normal,expandedRoles:extra,all:[...new Set(all)],any:[...new Set(any)]};
   };
   resolveDoor.roles=[...new Set(roles.map(role=>role.name))].sort();
+  resolveDoor.roleSources=roleSources;
   return resolveDoor;
 }

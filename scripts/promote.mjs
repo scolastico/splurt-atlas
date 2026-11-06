@@ -8,6 +8,7 @@ export function promote(output) {
   output = path.resolve(output);
   if (path.dirname(output) !== cacheRoot || !/^export-[\da-f-]+$/.test(path.basename(output))) throw new Error('Promotion only accepts this project’s .cache/export-<uuid> directories.');
   const manifest = JSON.parse(readFileSync(path.join(output, 'manifest.json')));
+  if(manifest.complete===false)throw new Error('Cannot publish an incomplete generation checkpoint.');
   const config = JSON.parse(readFileSync('atlas.config.json'));
   if (manifest.commit !== config.ref || !manifest.maps?.length) throw new Error('Staged export does not match the configured source revision.');
   const destination = path.resolve('public/data'), previous = path.join(cacheRoot, `previous-${randomUUID()}`);

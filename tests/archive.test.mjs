@@ -28,3 +28,7 @@ test('extraction rejects missing, mismatched and traversal archive entries',asyn
     await assert.rejects(extractArchive(new Blob([await zip.generateAsync({type:'uint8array'})]),()=>{}));
   }
 });
+test('current viewport assets are extracted before other chunks',async()=>{
+ const zip=new JSZip(),assets=Array.from({length:65},(_,index)=>({path:`1/chunk-${index}.webp`,bytes:1}));zip.file('assets.json',JSON.stringify(assets));for(const asset of assets)zip.file(asset.path,'x');const batches=[];
+ await extractArchive(new Blob([await zip.generateAsync({type:'uint8array'})]),batch=>{batches.push(batch.map(item=>item.path));},()=>false,['1/chunk-64.webp']);assert.equal(batches[0][0],'1/chunk-64.webp');assert.equal(batches.flat().length,66);
+});

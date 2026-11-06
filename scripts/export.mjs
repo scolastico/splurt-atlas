@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync, rmSync,renameSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -13,13 +13,28 @@ import { buildInfrastructure } from './lib/infrastructure.mjs';
 import { createDoorResolver } from './lib/door-access.mjs';
 import { bakeRuntimeTerrain, runtimeReplacement } from './lib/runtime-terrain.mjs';
 import { digest, converterDigest, loadBaseline, completeMap, reuseMap, canQuickReuse, mapFingerprint, legacyMatches } from './lib/incremental.mjs';
+import { bakedChannel } from './lib/utility-visibility.mjs';
+import { doorControlKeys,collectDoorControls } from './lib/door-controls.mjs';
+import {createObjectVisual} from './lib/object-visual.mjs';
+import {exportProgress} from './export-progress.mjs';
+import {objectOffsets} from './lib/object-offsets.mjs';
+import {parallelExport} from './export-parallel.mjs';
 
+if(process.env.ATLAS_EXPORT_WORKER!=='1'){
+  await parallelExport();
+}else{
+const progress=exportProgress();
+sharp.concurrency(Number(process.env.ATLAS_SHARP_THREADS)||1);
 sharp.cache({ memory: 128, files: 20, items: 100 });
 const config = JSON.parse(readFileSync('atlas.config.json'));
+if(process.env.ATLAS_SOURCE_REF){if(!/^[a-f\d]{40}$/.test(process.env.ATLAS_SOURCE_REF)||process.env.ATLAS_STAGE_ONLY!=='1')throw new Error('Local source overrides require a staged export and a full commit SHA');config.ref=process.env.ATLAS_SOURCE_REF;}
 const root = path.resolve('.source/S.P.L.U.R.T-tg'), cacheRoot = path.resolve('.cache');
-const output = path.join(cacheRoot, `export-${randomUUID()}`);
+const output = process.env.ATLAS_EXPORT_OUTPUT?path.resolve(process.env.ATLAS_EXPORT_OUTPUT):path.join(cacheRoot, `export-${randomUUID()}`);
+const relativeOutput=path.relative(cacheRoot,output).split(path.sep),validPart=part=>/^export-[a-f\d-]+$/.test(part);
+if(!(relativeOutput.length===1&&validPart(relativeOutput[0]))&&!(process.env.ATLAS_STAGE_ONLY==='1'&&relativeOutput.length===3&&validPart(relativeOutput[0])&&relativeOutput[1]==='workers'&&validPart(relativeOutput[2])))throw new Error('Invalid export staging directory');
 if (!existsSync(root)) throw new Error('Run pnpm source first.');
 const provenance = JSON.parse(readFileSync('.source/provenance.json'));
+if(process.env.ATLAS_SOURCE_REF)provenance.commit=config.ref;
 if (provenance.commit !== config.ref) throw new Error('Source pin changed: run pnpm source first.');
 const args = process.argv.slice(2).filter(v => v !== '--');
 const incremental = args.includes('--incremental'), adopt = args.includes('--adopt-baseline');
@@ -41,6 +56,7 @@ const available = readdirSync(`${root}/_maps`).filter(v => v.endsWith('.json'));
 const selected = (mapArgs.includes('--all') || (!mapArgs.length&&config.maps==='all') ? available.map(v => v.slice(0, -5)) : (mapArgs.length ? mapArgs : config.maps)).filter(id=>!(config.excludeMaps||[]).includes(id));
 mkdirSync(output, { recursive: true });
 console.log('Indexing DM declarations in include order…');
+progress.update('Indexing DM declarations');
 const db = loadTypes(root), sprites = createSpriteReader(root);
 let usedTypes = new Set(), usedIcons = new Set();
 const resolveType = db.resolve, hasState = sprites.hasState;
@@ -49,10 +65,12 @@ sprites.hasState = (icon,state) => { if(icon)usedIcons.add(icon);return hasState
 db.hasIconState = sprites.hasState;
 console.log(`${db.types.size} types from ${db.fileCount} DM files`);
 const manifest = { schema: 2, buildId:randomUUID(), converter, ...provenance, tilePixels: config.tilePixels, chunkTiles: config.chunkTiles, maps: [] };
+function checkpoint(){if(process.env.ATLAS_CHECKPOINT==='1'){const temporary=path.join(output,'manifest.checkpoint.json');writeFileSync(temporary,JSON.stringify({...manifest,complete:false},null,2));renameSync(temporary,path.join(output,'manifest.json'));}}
 const rebuilt = [], reused = [], iconHashes = new Map();
 const S = config.tilePixels, C = config.chunkTiles, P = S * C;
 const imageCache = new Map();
 const numeric = (v, fallback) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+const objectVisual=createObjectVisual(db,sprites,S);
 
 function candidates(type, vars, seen = new Set()) {
   if (seen.has(type) || seen.size > 12) return [];
@@ -63,26 +81,27 @@ function candidates(type, vars, seen = new Set()) {
 }
 
 async function tileImage(atoms, channel) {
-  const selected = atoms.filter(a => (classify(a.path) || 'base') === channel && !a.path.startsWith('/area/') && !/\/landmark|\/spawner\//.test(a.path));
+  const selected = atoms.filter(a => bakedChannel(a,atoms,db) === channel && !a.path.startsWith('/area/') && !/\/landmark|\/spawner\//.test(a.path));
   const key = JSON.stringify(selected);
   if (imageCache.has(key)) return imageCache.get(key);
   const job = (async () => {
     const layers = [];
     for (const atom of selected) {
-      const vars = { ...db.resolve(atom.path), ...atom.vars };
+      const vars = objectOffsets(atom.path,{ ...db.resolve(atom.path), ...atom.vars },db);
       if (/\/space(?:\/|$)|\/openspace(?:\/|$)/.test(atom.path)) continue;
       const icon = unquote(vars.icon), state = unquote(vars.icon_state);
       if (!icon || !icon.endsWith('.dmi')) continue;
       const opacity = Math.min(numeric(vars.alpha, 255), atom.path.startsWith('/turf/') && aperture(atom.path) ? 255 - aperture(atom.path) : 255);
-      const sprite = await sprites.sprite(icon, state, numeric(vars.dir, 2), unquote(vars.color), opacity);
+      const sprite = await sprites.sprite(icon, state, numeric(vars.dir, 2), unquote(vars.color), opacity,numeric(vars.atlas_rotation,0));
       if (!sprite) continue;
       // Tiles use a one-cell gutter, preserving pixel offsets and up to 96px icons.
       const translation = vars.transform?.match(/^TRANSLATE_MATRIX\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)/);
-      const left = Math.round(S + numeric(vars.pixel_x, 0) + numeric(translation?.[1], 0));
-      const top = Math.round(S + S - sprite.height - numeric(vars.pixel_y, 0) - numeric(translation?.[2], 0));
+      const left = Math.round(S + numeric(vars.pixel_x, 0) + numeric(vars.pixel_w,0) + (sprite.offsetX||0) + numeric(translation?.[1], 0));
+      const top = Math.round(S + S - sprite.height - numeric(vars.pixel_y, 0) - numeric(vars.pixel_z,0) - (sprite.offsetY||0) - numeric(translation?.[2], 0));
       if (left < 0 || top < 0 || left + sprite.width > S * 3 || top + sprite.height > S * 3) continue;
       const defaultLayer = atom.path.startsWith('/turf/') ? 1 : atom.path.includes('turf_decal') ? 2 : atom.path.startsWith('/mob/') ? 5 : 3;
-      layers.push({ input: sprite.input, left, top, layer: numeric(vars.layer, defaultLayer) });
+      const renderLayer=/^\/obj\/structure\/disposal(pipe|construct)(?:\/|$)/.test(atom.path)?2.25:numeric(vars.layer, defaultLayer);
+      layers.push({ input: sprite.input, left, top, layer:renderLayer });
     }
     if (!layers.length) return null;
     layers.sort((a, b) => a.layer - b.layer);
@@ -92,13 +111,15 @@ async function tileImage(atoms, channel) {
 }
 
 for (const id of selected) {
+  const mapIndex=selected.indexOf(id);
+  progress.update(`Preparing ${id} (${mapIndex+1}/${selected.length})`,100*mapIndex/selected.length);
   imageCache.clear();
   usedTypes = new Set(); usedIcons = new Set();
   if (!/^[\w-]+$/.test(id)) throw new Error(`Invalid map id ${id}`);
   const previous = baseline?.manifest.maps.find(map => map.id === id);
   const dir = `${output}/${id}`;
   if(canQuickReuse(baseline,previous,converter,changed,config) && completeMap(baseline.root,previous)){
-    manifest.maps.push(reuseMap(baseline,previous,dir));reused.push(id);console.log(`${id}: reused (no relevant file changes)`);continue;
+    manifest.maps.push(reuseMap(baseline,previous,dir));reused.push(id);console.log(`${id}: reused (no relevant file changes)`);checkpoint();continue;
   }
   const meta = JSON.parse(readFileSync(`${root}/_maps/${id}.json`));
   const doorAccess=createDoorResolver(db,meta.job_changes||{});
@@ -136,10 +157,10 @@ for (const id of selected) {
   for (const [key, atoms] of dictionary) {
     const area = atoms.find(a => a.path.startsWith('/area'))?.path || '/area/space';
     const turf = atoms.find(a => a.path.startsWith('/turf'))?.path || '/turf/open/space';
-    const definition = { area: getArea(area), turf, aperture: aperture(turf), atoms: atoms.filter(a => !a.path.startsWith('/area')).map(a => {
+    const definition = { area: getArea(area), turf, aperture: aperture(turf), atoms: await Promise.all(atoms.filter(a => !a.path.startsWith('/area')).map(async a => {
       const v = { ...db.resolve(a.path), ...a.vars };
-      return { path: a.path, name: unquote(v.name) || pretty(a.path), description:unquote(v.desc), doorAccess:a.path.startsWith('/obj/machinery/door/')?doorAccess(atoms,a):undefined, network: classify(a.path), vars: a.vars, source: db.types.get(a.path)?.file ?? null };
-    }) };
+      return { path: a.path, name: unquote(v.name) || pretty(a.path), description:unquote(v.desc),visual:await objectVisual(a,v), doorAccess:a.path.startsWith('/obj/machinery/door/')?doorAccess(atoms,a):undefined,controlKeys:a.path.startsWith('/obj/machinery/door/')?doorControlKeys(a,db):undefined, network: classify(a.path), vars: a.vars, source: db.types.get(a.path)?.file ?? null };
+    })) };
     const loot = [];
     for (const atom of atoms) {
       const vars = { ...db.resolve(atom.path), ...atom.vars };
@@ -179,7 +200,7 @@ for (const id of selected) {
     }
     return { ...area, points };
   }).filter(room => room.points.length);
-  const mapMeta = { id, name: meta.map_name, width, height, levels, areas, rooms, jobRoles:doorAccess.roles, infrastructure, definitions: defs, files: files.map(file => `_maps/${meta.map_path}/${file}`), traits: meta.traits || [], unresolvedSpawners: [...new Set(unresolved)] };
+  const mapMeta = { id, name: meta.map_name, width, height, levels, areas, rooms, jobRoles:doorAccess.roles,jobRoleSources:doorAccess.roleSources,doorControls:collectDoorControls(cells,dictionary,db), infrastructure, definitions: defs, files: files.map(file => `_maps/${meta.map_path}/${file}`), traits: meta.traits || [], unresolvedSpawners: [...new Set(unresolved)] };
   // Resolve generated terrain before comparing metadata and rendering inputs.
   for(const def of defs){const replacement=runtimeReplacement(def,areas[def.area],db);if(replacement)def.runtimeTerrain=replacement;}
   const recordIcon = atom => { const icon=unquote(({...db.resolve(atom.path),...atom.vars}).icon);if(icon.endsWith('.dmi'))usedIcons.add(icon); };
@@ -191,7 +212,7 @@ for (const id of selected) {
   const fingerprint=mapFingerprint({converter,config,metadata:mapMeta,items,cells,types,icons});
   const inputs=[`_maps/${id}.json`,...mapMeta.files,...icons.map(([icon])=>icon)];
   if(previous && (previous.fingerprint===fingerprint || (adopt && legacyMatches(baseline,previous,provenance.commit,mapMeta,items))) && completeMap(baseline.root,previous)){
-    manifest.maps.push({...reuseMap(baseline,previous,dir),fingerprint,inputs});reused.push(id);console.log(`${id}: reused (rendering inputs unchanged)`);continue;
+    manifest.maps.push({...reuseMap(baseline,previous,dir),fingerprint,inputs});reused.push(id);console.log(`${id}: reused (rendering inputs unchanged)`);checkpoint();continue;
   }
   rebuilt.push(id);
   writeFileSync(`${dir}/map.json`, JSON.stringify(mapMeta));
@@ -214,10 +235,13 @@ for (const id of selected) {
     }
     const levelDir = `${dir}/${z}`; mkdirSync(levelDir, { recursive: true });
     await sharp(holes, { raw: { width, height, channels: 4 } }).png().toFile(`${levelDir}/aperture.png`);
-    const chunkIndex = { base: [], pipes: [], power: [], disposal: [], transit: [] };
+    const chunkIndex = { base: [], foreground:[], pipes: [], power: [], fluid: [], disposal: [], transit: [], 'disposal-surface':[], 'pipes-surface':[], 'power-surface':[], 'fluid-surface':[] };
     const overviews = [];
     for (const [channel] of Object.entries(chunkIndex)) {
+      let renderedChunks=0;
       for (const [ck, entries] of chunks) {
+        const fraction=(Object.keys(chunkIndex).indexOf(channel)+renderedChunks++/chunks.size)/Object.keys(chunkIndex).length;
+        progress.update(`${meta.map_name}: deck ${z}, ${channel}, chunk ${renderedChunks}/${chunks.size}`,100*(mapIndex+(levels.indexOf(z)+fraction)/levels.length)/selected.length);
         const composite = [];
         for (const { cell, px, py, cx, cy } of entries) {
           const input = await tileImage(cell.appearance, channel);
@@ -251,6 +275,7 @@ for (const id of selected) {
   listAssets(dir);writeFileSync(`${dir}/assets.json`,JSON.stringify(assets));
   manifest.maps.push({ id, name: meta.map_name, width, height, levels, items: items.length,fingerprint,inputs,assetVersion:fingerprint,assets:`${id}/assets.json`,bytes:assets.reduce((n,a)=>n+a.bytes,0),preview:existsSync(`${dir}/${levels.at(-1)}/base-overview.webp`)?`${id}/${levels.at(-1)}/base-overview.webp`:null });
   if(existsSync(`${dir}/${levels.at(-1)}/natural-overview.webp`))manifest.maps.at(-1).naturalPreview=`${id}/${levels.at(-1)}/natural-overview.webp`;
+  checkpoint();
 }
 copyFileSync(`${root}/LICENSE`, `${output}/UPSTREAM-LICENSE.txt`);
 copyFileSync(`${root}/README.md`, `${output}/UPSTREAM-README.md`);
@@ -260,5 +285,7 @@ writeFileSync(`${output}/build-report.json`,JSON.stringify({commit:provenance.co
 writeFileSync(`${output}/manifest.json`, JSON.stringify(manifest, null, 2));
 // Release libvips file handles before the atomic directory swap on Windows.
 sharp.cache(false);
-promote(output);
+if(process.env.ATLAS_STAGE_ONLY!=='1')promote(output);
+progress.finish();
 console.log(`Exported ${manifest.maps.length} stations. Sprite report:`, sprites.report);
+}

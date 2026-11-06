@@ -35,8 +35,8 @@ export function createSpriteReader(root) {
   }
   const icons = new Set();
   const report = { requested: 0, missingIcon: 0, missingState: 0, samples: [] };
-  async function sprite(icon, state, dir = 2, tint = '', alpha = 255) {
-    const key = JSON.stringify([icon, state, dir, tint, alpha]);
+  async function sprite(icon, state, dir = 2, tint = '', alpha = 255, rotation=0) {
+    const key = JSON.stringify([icon, state, dir, tint, alpha, rotation]);
     if (sprites.has(key)) return sprites.get(key);
     const job = (async () => {
       report.requested++;
@@ -63,11 +63,15 @@ export function createSpriteReader(root) {
         let image = sharp(file.data, { raw: file.info }).extract({ left, top, width: file.width, height: file.height });
         let { data, info } = await image.raw().toBuffer({ resolveWithObject: true });
         const color = /^#[\da-f]{6}$/i.test(tint) ? [1, 3, 5].map(n => parseInt(tint.slice(n, n + 2), 16) / 255) : [1, 1, 1];
+        let minX=info.width,minY=info.height,maxX=-1,maxY=-1;
         for (let p = 0; p < data.length; p += 4) {
           for (let c = 0; c < 3; c++) data[p + c] *= color[c];
           data[p + 3] *= alpha / 255;
+          if(data[p+3]){const index=p/4,x=index%info.width,y=Math.floor(index/info.width);minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}
         }
-        return { input: await sharp(data, { raw: info }).png().toBuffer(), width: info.width, height: info.height };
+        let output=sharp(data,{raw:info});if(rotation%360)output=output.rotate(rotation,{background:'#00000000'});
+        const result=await output.png().toBuffer({resolveWithObject:true});
+        return { input:result.data,width:result.info.width,height:result.info.height,offsetX:(info.width-result.info.width)/2,offsetY:(info.height-result.info.height)/2,bounds:maxX<0?null:rotation%360?{x:0,y:0,width:result.info.width,height:result.info.height}:{x:minX,y:minY,width:maxX-minX+1,height:maxY-minY+1} };
       } catch {
         report.missingIcon++; return null;
       }

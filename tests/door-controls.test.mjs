@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {doorControlKeys,collectDoorControls} from '../scripts/lib/door-controls.mjs';
+test('door controls match explicit IDs and distinguish blast, airlock and timer controllers',()=>{
+ const db={resolve:()=>({}),literal:value=>value},door={path:'/obj/machinery/door/poddoor',vars:{id:'"shutters"'}};assert.deepEqual(doorControlKeys(door,db),[{kind:'poddoor',id:'shutters'}]);assert.deepEqual(doorControlKeys({path:'/obj/machinery/door/airlock',vars:{id_tag:'"lab"'}},db),[{kind:'airlock',id:'lab'}]);
+ const dictionary=new Map([['a',[{path:'/obj/machinery/button/door',vars:{id:'"shutters"',name:'"Shutter button"'}}]],['b',[{path:'/obj/machinery/button/door',vars:{id:'"lab"',normaldoorcontrol:'TRUE',specialfunctions:'OPEN|BOLTS'}}]],['c',[{path:'/obj/machinery/button/door',vars:{id:'"lock-only"',normaldoorcontrol:'TRUE',specialfunctions:'4'}}]],['d',[{path:'/obj/machinery/door_buttons/access_button',vars:{idDoor:'"lab"'}}]]]);
+ const controls=collectDoorControls(['a','b','c','d'].map((key,index)=>({key,x:index+1,y:2,z:1})),dictionary,db);assert.equal(controls.length,3);assert.equal(controls[0].name,'Shutter button');assert.deepEqual(controls.map(control=>control.kind),['poddoor','airlock','airlock']);
+});
