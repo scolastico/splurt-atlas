@@ -20,6 +20,8 @@ export function renderChannel(atom,atoms,db){
   return channel&&channel!=='transit'&&utilityExposed(atom,atoms,db)?channel+'-surface':channel||'base';
 }
 export function bakedChannel(atom,atoms,db){
+  // Atmospherics components (vents, scrubbers, pumps...) stay visible under intact floors; only their pipe caps hide.
+  if(classify(atom.path)==='pipes'&&atom.path.includes('/components/')&&!String(atom.vars?.icon||'').includes('pipe_underlays'))return 'foreground';
   const channel=renderChannel(atom,atoms,db);
   if(channel.endsWith('-surface')){
     if(channel==='disposal-surface'&&!/^\/obj\/structure\/disposal(pipe|construct)(?:\/|$)/.test(atom.path))return 'foreground';
