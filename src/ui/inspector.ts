@@ -490,7 +490,7 @@ function paintAreaInspector(area: AreaSelection): void {
   const inspector = $('inspector');
   inspector.innerHTML = `<button class="close" aria-label="Close inspector">&times;</button>
     <span class="tiny-label">AREA INSPECTOR / Z${area.z}</span><h3>${count} selected tiles</h3>
-    <p>X ${area.x1}–${area.x2} / Y ${area.y1}–${area.y2}</p>
+    <p>X ${area.x1}-${area.x2} / Y ${area.y1}-${area.y2}</p>
     <h4 class="info-heading">Rooms</h4><ul>${[...rooms].map(([id, count]) => `<li>${escapeHtml(map.areas[id].name)} (${count} tiles)</li>`).join('')}</ul>
     <h4 class="info-heading">Surfaces and mapped objects</h4>
     <ul>${[...objects.values()]

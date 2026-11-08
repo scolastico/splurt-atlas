@@ -102,7 +102,7 @@ export interface RuntimeTerrain {
 export interface Definition {
   area: number;
   turf: string;
-  /** 0–255 opacity of the turf as seen from the deck above. */
+  /** 0-255 opacity of the turf as seen from the deck above. */
   aperture: number;
   atoms: Atom[];
   runtimeTerrain?: RuntimeTerrain;

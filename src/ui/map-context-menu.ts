@@ -169,7 +169,7 @@ export function initMapContextMenu(): void {
       message('Share URL copied.');
     });
     button('Copy XY coordinates', async () => {
-      await copyText(area ? `${area.x1}, ${area.y1} – ${area.x2}, ${area.y2}` : `${tile.x}, ${tile.y}`);
+      await copyText(area ? `${area.x1}, ${area.y1} - ${area.x2}, ${area.y2}` : `${tile.x}, ${tile.y}`);
       message('Coordinates copied.');
     });
     button('Start area selection', () => {

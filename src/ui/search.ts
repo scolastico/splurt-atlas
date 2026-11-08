@@ -126,7 +126,7 @@ function showFindings(): void {
 <div class="finding-list"></div>
 <div class="finding-pages">
 <button class="previous" ${start === 0 ? 'disabled' : ''} aria-label="Previous findings">←</button>
-<span>${start + 1}–${end} / ${finding.count}</span>
+<span>${start + 1}-${end} / ${finding.count}</span>
 <button class="next" ${end >= finding.count ? 'disabled' : ''} aria-label="Next findings">→</button>
 </div>`;
   const list = panel.querySelector('.finding-list')!;
