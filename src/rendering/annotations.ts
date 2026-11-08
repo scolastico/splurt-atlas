@@ -116,7 +116,7 @@ export function drawAnnotations(context: CanvasRenderingContext2D): void {
   const map = state.map;
   if (!map || !state.levels.has(state.z)) return;
   applyWorldTransform(context);
-  context.lineWidth = 1 / state.zoom;
+  context.lineWidth = 2.5 / state.zoom;
   if (state.regions) drawRegions(context);
   context.globalAlpha = 1;
   context.lineWidth = 2 / state.zoom;
