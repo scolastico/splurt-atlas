@@ -8,7 +8,7 @@ const closetMethods = new WeakMap();
 
 /** Literal item constructions inside population methods, including conditional contents.
  * These are candidates, since conditions and random rolls are not executed. */
-export function closetCandidates(db, type, seen = new Set()) {
+export function closetCandidates(db, type, seen = new Set(), overrides = {}) {
   if (!/^\/obj\/structure\/closet(?:\/|$)/.test(type) || seen.has(type)) return [];
   seen.add(type);
   if (!closetMethods.has(db)) {
@@ -37,9 +37,17 @@ export function closetCandidates(db, type, seen = new Set()) {
       ),
     ];
   };
+  const vars = { ...db.resolve(type), ...overrides };
+  const declared = vars.possible_loot?.match(/\/(?:obj|mob)\/[\w/]+/g) || [];
   return [
-    ...new Set([...collect(type, 'PopulateContents'), ...collect(type, 'populate_contents_immediate')]),
-  ].flatMap((path) => (path.includes('/spawner/') ? spawnCandidates(db, path, db.resolve(path)) : [path]));
+    ...new Set([
+      ...collect(type, 'PopulateContents'),
+      ...collect(type, 'populate_contents_immediate'),
+      ...declared,
+    ]),
+  ].flatMap((path) =>
+    path.includes('/spawner/') ? spawnCandidates(db, path, db.resolve(path), new Set(seen)) : [path],
+  );
 }
 
 /**
@@ -55,10 +63,12 @@ export function spawnCandidates(db, type, vars, seen = new Set()) {
       ...paths,
       ...db.pool(vars.loot_table?.includes('DUMPSTER') ? 'dumpster_loot' : 'maintenance_loot'),
     ];
+  if (/\/closet_empty\/crate\/with_loot(?:\/|$)/.test(type))
+    paths = [...paths, ...db.pool('maintenance_loot')];
   const expanded = paths.flatMap((candidate) =>
     candidate.includes('/spawner/')
       ? spawnCandidates(db, candidate, db.resolve(candidate), new Set(seen))
-      : [candidate],
+      : [candidate, ...closetCandidates(db, candidate, new Set(seen))],
   );
   return [...new Set(expanded)];
 }
@@ -73,7 +83,7 @@ export function tileLoot(db, atoms, unresolved) {
     const vars = { ...db.resolve(atom.path), ...atom.vars };
     if (atom.path.startsWith('/obj/item/'))
       loot.push({ path: atom.path, name: unquote(vars.name) || pretty(atom.path), kind: 'placed' });
-    for (const candidate of closetCandidates(db, atom.path))
+    for (const candidate of closetCandidates(db, atom.path, new Set(), atom.vars))
       loot.push({
         path: candidate,
         name: unquote(db.resolve(candidate).name) || pretty(candidate),

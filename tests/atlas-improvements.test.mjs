@@ -148,7 +148,8 @@ test('catwalk utilities are below the transparent floor by default and available
             width: 1,
             height: 1,
             channels: 4,
-            background: state === 'floor' ? { r: 0, g: 0, b: 255, alpha: opacity / 255 } : '#ff0000',
+            // The grate's holes belong to the native sprite, not a deck cutaway.
+            background: state === 'floor' ? { r: 0, g: 0, b: 255, alpha: 0.5 } : '#ff0000',
           },
         })
           .png()

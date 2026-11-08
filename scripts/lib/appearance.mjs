@@ -3,6 +3,18 @@
 import { transitOverlays } from './transit-appearance.mjs';
 import { unquote } from './dm.mjs';
 
+/** Fullbright fixtures still need their lit tube/bulb/floor overlay. */
+export function lightOverlays(atom, db) {
+  if (!/^\/obj\/machinery\/light(?:\/|$)/.test(atom.path)) return [];
+  const vars = { ...db.resolve(atom.path), ...atom.vars };
+  const literal = (value) => (db.literal ? db.literal(String(value)) : String(value));
+  if (literal(vars.status || 'LIGHT_OK') !== literal('LIGHT_OK')) return [];
+  const icon = unquote(vars.overlay_icon);
+  const state = unquote(vars.base_state || vars.icon_state);
+  if (!icon.endsWith('.dmi') || !state || (db.hasIconState && !db.hasIconState(icon, state))) return [];
+  return [{ ...atom, vars: { ...atom.vars, icon: vars.overlay_icon, icon_state: JSON.stringify(state) } }];
+}
+
 /** Reconstruct the static door and status overlays used by closet_update_overlays. */
 export function closetOverlays(atom, db) {
   if (!/^\/obj\/structure\/closet(?:\/|$)/.test(atom.path)) return [];
@@ -56,6 +68,48 @@ export function expandStructures(atoms, db, depth = 0) {
   if (depth > 8) return atoms;
   return atoms.flatMap((atom) => {
     const vars = { ...db.resolve(atom.path), ...atom.vars };
+    if (/^\/turf\/open\/floor\/catwalk_floor(?:\/|$)/.test(atom.path)) {
+      const base = unquote(vars.catwalk_type || '"maint"');
+      const covered = !['FALSE', '0'].includes(String(db.literal ? db.literal(vars.covered) : vars.covered));
+      return [
+        { ...atom, vars: { ...atom.vars, icon_state: JSON.stringify(`${base}_below`), layer: '-200' } },
+        {
+          ...atom,
+          vars: { ...atom.vars, icon_state: JSON.stringify(`${base}_${covered ? 'above' : 'overlay'}`) },
+        },
+      ];
+    }
+    if (/^\/obj\/structure\/closet\/crate(?:\/|$)/.test(atom.path)) {
+      const flag = (key) => ['TRUE', '1'].includes(String(db.literal ? db.literal(vars[key]) : vars[key]));
+      const base = unquote(
+        vars.base_icon_state && vars.base_icon_state !== 'null' ? vars.base_icon_state : vars.icon_state,
+      );
+      const crate = {
+        ...atom,
+        vars: { ...atom.vars, icon_state: JSON.stringify(`${base}${flag('opened') ? 'open' : ''}`) },
+      };
+      const states = [];
+      if (!flag('opened')) {
+        if (flag('broken')) states.push('securecrateemag');
+        else if (flag('locked')) states.push('securecrater');
+        else if (flag('secure')) states.push('securecrateg');
+      }
+      const overlays = states
+        .filter((state) => !db.hasIconState || db.hasIconState(unquote(vars.icon), state))
+        .map((state) => ({ ...atom, vars: { ...atom.vars, icon_state: JSON.stringify(state) } }));
+      if (flag('opened') && vars.lid_icon_state && vars.lid_icon_state !== 'null')
+        overlays.push({
+          ...atom,
+          vars: {
+            ...atom.vars,
+            icon: vars.lid_icon || vars.icon,
+            icon_state: vars.lid_icon_state,
+            pixel_w: vars.lid_w || '0',
+            pixel_z: vars.lid_z || '0',
+          },
+        });
+      return [crate, ...overlays];
+    }
     if (/^\/obj\/machinery\/duct(?:\/|$)/.test(atom.path)) {
       const literal = (value) => (db.literal ? db.literal(value) : value);
       const color = literal(vars.duct_color || vars.color || ''),
@@ -103,7 +157,7 @@ export function expandStructures(atoms, db, depth = 0) {
       const directions = { north: '1', south: '2', east: '4', west: '8' };
       return [{ path: parent, vars: { ...atom.vars, dir: directions[atom.path.split('/').at(-1)] || '2' } }];
     }
-    return [atom, ...transitOverlays(atom, db), ...closetOverlays(atom, db)];
+    return [atom, ...transitOverlays(atom, db), ...closetOverlays(atom, db), ...lightOverlays(atom, db)];
   });
 }
 

@@ -52,7 +52,8 @@ test('DMI state offsets include every direction and animation frame', () => {
 });
 test('cutaway opens only through known transparent turf families', () => {
   assert.equal(aperture('/turf/open/floor/glass'), 95);
-  assert.equal(aperture('/turf/open/floor/catwalk_floor/iron_smooth'), 145);
+  assert.equal(aperture('/turf/open/floor/catwalk_floor/iron_smooth'), 0);
+  assert.equal(aperture('/turf/open/floor/catwalk'), 145);
   assert.equal(aperture('/turf/open/floor/iron'), 0);
   assert.equal(aperture('/turf/open/openspace'), 255);
   assert.equal(classify('/obj/structure/disposalpipe/sorting'), 'disposal');

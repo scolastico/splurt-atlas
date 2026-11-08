@@ -24,6 +24,7 @@ import { createObjectVisual } from './object-visual.mjs';
 import { createNaturalTerrain } from './runtime-terrain.mjs';
 import { buildRooms, buildSearchItems } from './spawn-records.mjs';
 import { createTileRenderer } from './tile-renderer.mjs';
+import { placeRoundstartShuttles } from './roundstart-shuttles.mjs';
 
 /** Per-cell appearances: expanded structures, smoothed neighbors, resolved random posters. */
 function buildAppearances(map, db) {
@@ -114,6 +115,7 @@ export async function runExportWorker() {
     if (existsSync(dir)) rmSync(dir, { recursive: true });
     mkdirSync(dir, { recursive: true });
     const map = loadStationMap(root, station);
+    files.push(...placeRoundstartShuttles(map, root, db));
     const { width, height, cells, dictionary, levels } = map;
     const { expanded, at } = buildAppearances(map, db);
     const infrastructure = buildInfrastructure(cells, at, db, levels);

@@ -3,12 +3,15 @@
 import sharp from 'sharp';
 import { aperture, unquote } from './dm.mjs';
 import { objectOffsets } from './object-offsets.mjs';
-import { bakedChannel, underCatwalk } from './utility-visibility.mjs';
+import { bakedChannel, underCatwalk, beaconVisibility } from './utility-visibility.mjs';
 
 const numeric = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 
 /** Atoms that draw nothing: areas, landmarks and spawner placeholders. */
-const invisible = (atom) => atom.path.startsWith('/area/') || /\/landmark|\/spawner\//.test(atom.path);
+const invisible = (atom) =>
+  atom.path.startsWith('/area/') ||
+  /^\/obj\/docking_port(?:\/|$)/.test(atom.path) ||
+  /\/landmark|\/spawner\//.test(atom.path);
 const SPACE_TURF = /\/space(?:\/|$)|\/openspace(?:\/|$)/;
 const DISPOSAL_PIPE = /^\/obj\/structure\/disposal(pipe|construct)(?:\/|$)/;
 /** Disposal pipes render beneath other pipes and wiring. */
@@ -78,7 +81,12 @@ export function createTileRenderer({ db, sprites, tilePixels }) {
   return {
     /** A PNG of the channel's sprites on a 3×3-tile canvas, or null when nothing draws. */
     render(atoms, channel) {
-      const underfloor = channel === 'base' ? atoms.filter((atom) => underCatwalk(atom, atoms, db)) : [];
+      const underfloor =
+        channel === 'base'
+          ? atoms.filter(
+              (atom) => underCatwalk(atom, atoms, db) || beaconVisibility(atom, atoms, db) === 'underfloor',
+            )
+          : [];
       const selected = atoms.filter(
         (atom) =>
           (bakedChannel(atom, atoms, db) === channel || underfloor.includes(atom)) && !invisible(atom),

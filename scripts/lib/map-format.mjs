@@ -18,8 +18,10 @@ export const CHANNELS = [
   'natural',
   // Mapper-only markers such as mail sorting or area helpers; hidden by default.
   'helpers',
+  'navigation',
+  'navigation-surface',
 ];
-export const UTILITIES = ['disposal', 'pipes', 'power', 'fluid', 'transit'];
+export const UTILITIES = ['disposal', 'pipes', 'power', 'fluid', 'transit', 'navigation'];
 // Overview strips: terrain channels in overview.webp, everything else in overview-utilities.webp.
 export const OVERVIEW_TERRAIN = ['base', 'foreground', 'natural'];
 // Coarser levels of detail: level L packs 2^L × 2^L chunks into one strip.

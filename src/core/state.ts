@@ -90,6 +90,7 @@ export const palette: Record<Network, string> = {
   fluid: '#a798e5',
   disposal: '#ce8baf',
   transit: '#80addb',
+  navigation: '#a6d88d',
 };
 
 export const networkNames: Record<Network, string> = {
@@ -98,6 +99,7 @@ export const networkNames: Record<Network, string> = {
   fluid: 'Fluid ducts',
   disposal: 'Waste disposal',
   transit: 'Transit tubes',
+  navigation: 'Navigation beacons',
 };
 
 /** Utility networks whose hidden components are currently shown. */

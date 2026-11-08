@@ -207,6 +207,7 @@ export function loadTypes(root) {
 }
 
 export function classify(type) {
+  if (/^\/obj\/machinery\/navbeacon(?:\/|$)/.test(type)) return 'navigation';
   if (/^\/obj\/machinery\/duct(?:\/|$)/.test(type)) return 'fluid';
   if (/\/atmospherics\//.test(type)) return 'pipes';
   if (/\/cable(?:\/|$)/.test(type)) return 'power';
@@ -218,6 +219,8 @@ export function classify(type) {
 export function aperture(turf) {
   if (/\/space(?:\/|$)|\/openspace(?:\/|$)/.test(turf)) return 255;
   if (/\/floor\/glass(?:\/|$)/.test(turf)) return 95;
-  if (/\/catwalk(?:_floor)?(?:\/|$)/.test(turf)) return 145;
+  // Catwalk flooring has its own opaque backing, unlike a catwalk over open space.
+  if (/\/catwalk_floor(?:\/|$)/.test(turf)) return 0;
+  if (/\/catwalk(?:\/|$)/.test(turf)) return 145;
   return 0;
 }

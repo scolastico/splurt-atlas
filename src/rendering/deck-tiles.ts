@@ -16,9 +16,9 @@ import {
 import { setLoading } from '../ui/loading.ts';
 import { screenCenterX, screenCenterY } from './projection.ts';
 import { enabledNetworks, state, type DeckLevel } from '../core/state.ts';
-import type { Network } from '../core/types.ts';
 import { deckScale, detailForZoom, type Detail } from '../model/view-state.ts';
-import { UTILITIES, slotIndex, stripName } from '../../scripts/lib/map-format.mjs';
+import { slotIndex, stripName } from '../../scripts/lib/map-format.mjs';
+import { channelsForDeck } from '../model/deck-channels.ts';
 
 export interface DeckTile {
   path: string;
@@ -203,19 +203,12 @@ function tileSources(z: number, item: DeckTile): TileSource[] {
 
 /** Channels to draw for a deck, in order: base, utilities on the viewed deck, foreground. */
 function deckChannels(z: number): string[] {
-  const channels = ['base'];
-  if (z === state.z) {
-    const simple = isChecked('simple-utilities') && !!state.map!.infrastructure?.nodes?.length;
-    for (const channel of UTILITIES) {
-      if (simple && ['power', 'pipes'].includes(channel)) continue;
-      channels.push(`${channel}-surface`);
-      if (enabledNetworks.has(channel as Network)) channels.push(channel);
-    }
-  }
-  channels.push('foreground');
-  // Mapper-only helper markers are drawn above everything else of the viewed deck.
-  if (z === state.z && isChecked('mapping-helpers')) channels.push('helpers');
-  return channels;
+  return channelsForDeck(
+    z === state.z,
+    enabledNetworks,
+    isChecked('simple-utilities') && !!state.map!.infrastructure?.nodes?.length,
+    isChecked('mapping-helpers'),
+  );
 }
 
 /** Prefetches one tile beyond the edges the camera is moving toward, at low priority. */

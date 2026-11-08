@@ -3,7 +3,7 @@
 // the compact on-disk form into the objects described here.
 
 /** Utility networks that can be toggled in the sidebar. */
-export type Network = 'pipes' | 'power' | 'fluid' | 'disposal' | 'transit';
+export type Network = 'pipes' | 'power' | 'fluid' | 'disposal' | 'transit' | 'navigation';
 
 /** data/manifest.json: the catalog of exported stations. */
 export interface Manifest {

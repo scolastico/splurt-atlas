@@ -32,6 +32,7 @@ export function renderChannel(atom, atoms, db) {
 export function underCatwalk(atom, atoms, db) {
   if (!atoms.some((item) => /\/catwalk(?:_floor)?(?:\/|$)/.test(item.path))) return false;
   const channel = classify(atom.path);
+  if (channel === 'navigation') return beaconVisibility(atom, atoms, db) === 'underfloor';
   if (!channel || channel === 'transit') return false;
   if (channel === 'pipes' && atom.path.includes('/components/')) return false;
   if (channel === 'disposal' && !/^\/obj\/structure\/disposal(pipe|construct)(?:\/|$)/.test(atom.path))
@@ -42,10 +43,30 @@ export function underCatwalk(atom, atoms, db) {
   return true;
 }
 const MAPPING_HELPER = /^\/obj\/effect\/mapping_helpers(?:\/|$)/;
+const NAVBEACON = /^\/obj\/machinery\/navbeacon(?:\/|$)/;
+
+/** Nav beacons are real undertile devices, not disposable mapping helpers. */
+export function beaconVisibility(atom, atoms, db) {
+  if (!NAVBEACON.test(atom.path)) return null;
+  const turf = atoms.find((item) => item.path.startsWith('/turf/'));
+  const vars = turf ? { ...db.resolve(turf.path), ...turf.vars } : {};
+  const raw = vars.underfloor_accessibility;
+  const value =
+    raw === undefined
+      ? /\/(plating|space|openspace)(?:\/|$)/.test(turf?.path || '')
+        ? 2
+        : /\/(glass|catwalk(?:_floor)?)(?:\/|$)/.test(turf?.path || '')
+          ? 1
+          : 0
+      : Number(db.literal ? db.literal(raw) : raw);
+  return value >= 2 ? 'surface' : value >= 1 ? 'underfloor' : 'hidden';
+}
 
 export function bakedChannel(atom, atoms, db) {
   // Mapping helpers only guide mappers (mail sorting, access, lighting...); they never exist in a round.
   if (MAPPING_HELPER.test(atom.path)) return 'helpers';
+  const beacon = beaconVisibility(atom, atoms, db);
+  if (beacon) return beacon === 'surface' ? 'navigation-surface' : 'navigation';
   // Atmospherics components (vents, scrubbers, pumps...) stay visible under intact floors; only their pipe caps hide.
   if (
     classify(atom.path) === 'pipes' &&

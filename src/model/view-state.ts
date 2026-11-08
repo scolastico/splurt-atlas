@@ -53,6 +53,7 @@ export const optionBits = {
   fluid: 15,
   'mapping-helpers': 16,
   'exact-search': 17,
+  navigation: 18,
 } as const;
 
 export type OptionKey = keyof typeof optionBits;
