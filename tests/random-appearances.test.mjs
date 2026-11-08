@@ -37,6 +37,49 @@ function database() {
   return { types, files: [], resolve: (type) => types.get(type) || {}, literal: (value) => value };
 }
 
+test('gib spawners preview declared remains and switch entirely to random markers', () => {
+  const db = database();
+  const path = '/obj/effect/gibspawner/human/bodypartless';
+  const gib = '/obj/effect/decal/cleanable/blood/gibs';
+  db.types.set(path, {
+    icon_state: '"gibspawner"',
+    gibtypes: `list(${gib} = 2, ${gib}/core = 1, ${gib}/torso = 1)`,
+  });
+  db.types.set(gib, { icon: "'blood.dmi'", random_icon_states: 'list("gib1", "gib2")', color: '"#c80000"' });
+  db.types.set(`${gib}/core`, { icon: "'blood.dmi'", random_icon_states: 'list("gibmid1", "gibmid2")' });
+  db.types.set(`${gib}/torso`, { icon: "'blood.dmi'", icon_state: '"gibtorso"', random_icon_states: 'null' });
+  db.hasIconState = (_icon, state) =>
+    ['gib1', 'gib2', 'gibmid1', 'gibmid2', 'gibtorso', 'gibtorso-overlay'].includes(state);
+  const source = { path, vars: { pixel_x: '3' } };
+  const before = structuredClone(source);
+  const result = randomAppearances([source], [source], 81, 183, 3, db);
+  assert.deepEqual(randomSourceInfo(source, db), { kind: 'gibs' });
+  const previews = result.filter((atom) => atom.vars.atlas_random_preview);
+  assert.equal(previews.length, 5, 'four declared decals plus the torso detail overlay');
+  assert.equal(previews.filter((atom) => atom.path === gib).length, 2, 'counts are retained');
+  assert.ok(previews.every((atom) => atom.path.startsWith(gib) && atom.vars.pixel_x === '3'));
+  assert.equal(previews.at(-1).vars.color, '"#ffffff"');
+  assert.ok(previews.every((atom) => bakedChannel(atom, result, db) === 'foreground'));
+  const markers = result.filter((atom) => atom.vars.atlas_random_marker);
+  assert.equal(markers.length, 2);
+  assert.ok(markers.every((atom) => bakedChannel(atom, result, db) === 'random-markers'));
+  assert.deepEqual(result, randomAppearances([source], [source], 81, 183, 3, db));
+  assert.deepEqual(source, before);
+  assert.match(
+    randomPreviewMarkup([{ name: 'bodypartless', random: { kind: 'gibs' } }], false),
+    /appearance and spread/,
+  );
+  for (const gibtypes of ['list()', `list(${gib} = unknown)`, `list(${gib} = 500)`]) {
+    const overridden = { path, vars: { gibtypes } };
+    assert.equal(
+      randomAppearances([overridden], [overridden], 81, 183, 3, db).filter(
+        (atom) => atom.vars.atlas_random_preview,
+      ).length,
+      0,
+    );
+  }
+});
+
 test('guaranteed vending spawns show a deterministic real vendor without leaking mapper sprite overrides', () => {
   const db = database();
   const source = { path: spawner, vars: { dir: '8', pixel_x: '5', icon_state: '"cola"' } };

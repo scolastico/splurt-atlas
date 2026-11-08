@@ -15,6 +15,9 @@ export function randomPreviewMarkup(atoms: Atom[], markers: boolean): string {
         note =
           atom.description ||
           'A vending machine is guaranteed here, but the displayed model is only one possible outcome.';
+      else if (atom.random?.kind === 'gibs')
+        note =
+          'The normal map view shows representative remains from this spawner. Their appearance and spread are randomized in game.';
       else if (atom.random?.kind === 'spawn')
         note =
           'This is a random spawn point. The exact result, and whether something appears, depend on its source settings.';

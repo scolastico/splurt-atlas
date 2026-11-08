@@ -88,7 +88,7 @@ export interface Atom {
   visual?: VisualBounds;
   doorAccess?: DoorAccess;
   controlKeys?: ControlKey[];
-  random?: { kind: 'vending' | 'poster' | 'trash' | 'plant' | 'spawn'; guaranteed?: boolean };
+  random?: { kind: 'vending' | 'poster' | 'trash' | 'plant' | 'gibs' | 'spawn'; guaranteed?: boolean };
 }
 
 export interface RuntimeTerrain {

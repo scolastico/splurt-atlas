@@ -7,6 +7,59 @@ const RANDOM_SPAWNER = /^\/obj\/effect\/spawner\/random(?:\/|$)/;
 const pools = new WeakMap();
 const literal = (db, value) => String(db.literal ? db.literal(String(value ?? '')) : (value ?? ''));
 const PLANT = /^\/obj\/item\/kirbyplants\/random(?:\/|$)/;
+const GIBSPAWNER = /^\/obj\/effect\/gibspawner(?:\/|$)/;
+
+/** Static gib declarations only; movement and the round's blood DNA are not simulated. */
+export function gibPreviews(atom, x, y, z, db) {
+  const vars = { ...db.resolve(atom.path), ...atom.vars };
+  const raw = literal(db, vars.gibtypes).trim();
+  if (!/^list\([\s\S]*\)$/.test(raw)) return [];
+  const paths = [];
+  for (const entry of splitTop(raw.slice(5, -1))) {
+    if (!entry.trim()) continue;
+    const match = entry
+      .trim()
+      .match(/^(\/obj\/effect\/decal\/cleanable\/blood\/gibs(?:\/[\w/]+)?)\s*=\s*(\d+)$/);
+    if (!match || Number(match[2]) > 32 || paths.length + Number(match[2]) > 64) return [];
+    paths.push(...Array(Number(match[2])).fill(match[1]));
+  }
+  return paths.flatMap((path, index) => {
+    const chosen = db.resolve(path);
+    if (!chosen.icon) return [];
+    const random = literal(db, chosen.random_icon_states).trim();
+    const states = /^list\([\s\S]*\)$/.test(random)
+      ? splitTop(random.slice(5, -1))
+          .filter((state) => /^"[^"\\]*"$/.test(state.trim()))
+          .map(unquote)
+      : [unquote(chosen.icon_state)];
+    const available = states.filter(
+      (state) => state && (!db.hasIconState || db.hasIconState(unquote(chosen.icon), state)),
+    );
+    if (!available.length) return [];
+    const state =
+      available[((seedFor(atom, x, y, z) + Math.imul(index, 2654435761)) >>> 0) % available.length];
+    const placement = Object.fromEntries(
+      ['pixel_x', 'pixel_y', 'pixel_w', 'pixel_z'].map((key) => [key, literal(db, vars[key] || '0')]),
+    );
+    const preview = {
+      path,
+      vars: { ...placement, icon: chosen.icon, icon_state: JSON.stringify(state), atlas_random_preview: '1' },
+    };
+    // Flesh/bone detail is an untinted overlay above the blood-colored base.
+    if (
+      !['FALSE', '0'].includes(literal(db, chosen.has_overlay ?? 'TRUE')) &&
+      db.hasIconState?.(unquote(chosen.icon), `${state}-overlay`)
+    )
+      return [
+        preview,
+        {
+          path,
+          vars: { ...preview.vars, icon_state: JSON.stringify(`${state}-overlay`), color: '"#ffffff"' },
+        },
+      ];
+    return [preview];
+  });
+}
 
 export function plantPreviewStates(atom, db) {
   const vars = { ...db.resolve(atom.path), ...atom.vars };
@@ -88,6 +141,7 @@ export function vendingPreviewPool(atom, db, seen = new Set()) {
 export function randomSourceInfo(atom, db) {
   if (!/^\/(obj|mob)\//.test(atom.path) || atom.path.startsWith('/obj/effect/mapping_helpers/')) return null;
   const vars = { ...db.resolve(atom.path), ...atom.vars };
+  if (GIBSPAWNER.test(atom.path)) return { kind: 'gibs' };
   if (PLANT.test(atom.path)) return { kind: 'plant' };
   if (/^\/obj\/structure\/trash_pile(?:\/|$)/.test(atom.path)) return { kind: 'trash' };
   if (/^\/obj\/structure\/sign\/poster(?:\/|$)/.test(atom.path) && vars.random_basetype?.startsWith('/'))
@@ -110,6 +164,7 @@ export function randomAppearances(atoms, originals, x, y, z, db) {
   const previews = atoms.flatMap((atom) => {
     const info = randomSourceInfo(atom, db);
     if (!info) return [atom];
+    if (info.kind === 'gibs') return gibPreviews(atom, x, y, z, db);
     if (info.kind === 'plant') {
       const icon = db.resolve('/obj/item/kirbyplants').icon;
       const states = plantPreviewStates(atom, db).filter(
