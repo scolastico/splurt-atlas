@@ -21,10 +21,21 @@ export const CHANNELS = [
   'navigation',
   'navigation-surface',
   'pipes-equipment',
+  'foreground-mapper',
+  'random-markers',
+  'pipes-floor-equipment',
 ];
 export const UTILITIES = ['disposal', 'pipes', 'power', 'fluid', 'transit', 'navigation'];
 // Overview strips: terrain channels in overview.webp, everything else in overview-utilities.webp.
-export const OVERVIEW_TERRAIN = ['base', 'foreground', 'natural', 'pipes-equipment'];
+export const OVERVIEW_TERRAIN = [
+  'base',
+  'foreground',
+  'natural',
+  'pipes-equipment',
+  'foreground-mapper',
+  'random-markers',
+  'pipes-floor-equipment',
+];
 // Coarser levels of detail: level L packs 2^L × 2^L chunks into one strip.
 export const LODS = [1, 2];
 
@@ -88,6 +99,7 @@ export function encodeMap(meta) {
         V(atom.visual),
         V(atom.doorAccess),
         V(atom.controlKeys),
+        V(atom.random),
       ]),
     ),
   ]);
@@ -130,7 +142,7 @@ export function decodeMap(data) {
   const { strings, values, atoms: packed, definitions: packedDefinitions, infrastructure, ...rest } = data;
   const str = (index) => (index < 0 ? null : strings[index]);
   const atoms = packed.map(
-    ([path, name, description, source, network, vars, visual, doorAccess, controlKeys]) => {
+    ([path, name, description, source, network, vars, visual, doorAccess, controlKeys, random]) => {
       const atom = {
         path: str(path),
         name: str(name),
@@ -142,6 +154,7 @@ export function decodeMap(data) {
       if (visual >= 0) atom.visual = values[visual];
       if (doorAccess >= 0) atom.doorAccess = values[doorAccess];
       if (controlKeys >= 0) atom.controlKeys = values[controlKeys];
+      if (random >= 0) atom.random = values[random];
       return atom;
     },
   );

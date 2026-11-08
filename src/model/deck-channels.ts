@@ -9,6 +9,7 @@ export function channelsForDeck(
   helpers: boolean,
   order: readonly Infrastructure[] = DEFAULT_INFRASTRUCTURE_ORDER,
   coloredPower = false,
+  randomMarkers = false,
 ): string[] {
   const channels = ['base'];
   const addNetwork = (channel: Infrastructure, reveal: boolean) => {
@@ -23,11 +24,13 @@ export function channelsForDeck(
   };
   if (viewed)
     for (const channel of [...order].reverse()) if (!networks.has(channel)) addNetwork(channel, false);
-  channels.push('foreground');
+  channels.push('pipes-floor-equipment');
   if (!viewed || !networks.has('pipes')) channels.push('pipes-equipment');
+  channels.push(randomMarkers ? 'foreground-mapper' : 'foreground');
   if (viewed)
     for (const channel of [...order].reverse()) if (networks.has(channel)) addNetwork(channel, true);
   if (viewed && networks.has('transit')) channels.push('transit');
+  if (randomMarkers) channels.push('random-markers');
   if (viewed && helpers) channels.push('helpers');
   return channels;
 }

@@ -168,7 +168,6 @@ export async function loadStation(id: string, restore = false): Promise<void> {
     assetCache.foregroundBusy = false;
     mapCanvas.style.pointerEvents = '';
     setLoading('', false);
-    $('source-status').textContent = 'ARCHIVE READY';
     redraw();
     share(true);
     enableSearch();
@@ -208,7 +207,6 @@ export function showMapPicker(): void {
   $('map-title').textContent = 'Choose a station';
   $('map-subtitle').textContent = `${manifest.maps.length} map configurations available`;
   $('station-meta').textContent = '';
-  $('source-status').textContent = 'ARCHIVE READY';
   document.querySelector<HTMLElement>('.floating-decks')!.hidden = true;
   document.querySelector<HTMLElement>('.map-tools')!.hidden = true;
   shareOptionsOnly();

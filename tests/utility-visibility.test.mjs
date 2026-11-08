@@ -56,7 +56,7 @@ test('atmospherics components stay visible under intact floors while their pipe 
   const closed = { path: '/turf/open/floor/iron', vars: {} },
     vent = { path: '/obj/machinery/atmospherics/components/unary/vent_scrubber', vars: {} };
   assert.equal(renderChannel(vent, [closed, vent], db), 'pipes');
-  assert.equal(bakedChannel(vent, [closed, vent], db), 'pipes-equipment');
+  assert.equal(bakedChannel(vent, [closed, vent], db), 'pipes-floor-equipment');
   const cap = {
     ...vent,
     vars: { icon: "'icons/obj/pipes_n_cables/pipe_underlays.dmi'", icon_state: '"intact_1_3"' },

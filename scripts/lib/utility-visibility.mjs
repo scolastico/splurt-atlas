@@ -74,9 +74,16 @@ export function beaconVisibility(atom, atoms, db) {
 }
 
 export function bakedChannel(atom, atoms, db) {
+  if (atom.vars?.atlas_random_marker === '1') return 'random-markers';
+  if (atom.vars?.atlas_random_preview === '1') return 'foreground';
   // Mapping helpers only guide mappers (mail sorting, access, lighting...); they never exist in a round.
   if (MAPPING_HELPER.test(atom.path)) return 'helpers';
   if (/^\/obj\/machinery\/meter(?:\/|$)/.test(atom.path)) return 'pipes-equipment';
+  if (
+    /\/components\/unary\/(vent_pump|vent_scrubber|passive_vent)(?:\/|$)/.test(atom.path) &&
+    !String(atom.vars?.icon || '').includes('pipe_underlays')
+  )
+    return 'pipes-floor-equipment';
   const beacon = beaconVisibility(atom, atoms, db);
   if (beacon) return beacon === 'surface' ? 'navigation-surface' : 'navigation';
   // Atmospherics components (vents, scrubbers, pumps...) stay visible under intact floors; only their pipe caps hide.
@@ -93,7 +100,6 @@ export function bakedChannel(atom, atoms, db) {
       !/^\/obj\/structure\/disposal(pipe|construct)(?:\/|$)/.test(atom.path)
     )
       return 'foreground';
-    if (channel === 'pipes-surface' && atom.path.includes('/components/')) return 'pipes-equipment';
     return channel;
   }
   if (/^\/obj\/structure\/(lattice|catwalk)(?:\/|$)/.test(atom.path)) return 'base';

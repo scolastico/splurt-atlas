@@ -123,24 +123,12 @@ body.sidebar-collapsed #viewport {
 .station-controls {
   padding: 19px 23px 12px;
 }
-.eyebrow,
 .tiny-label {
   font:
     0.75rem 'IBM Plex Mono',
     monospace;
   letter-spacing: 1.5px;
   color: var(--muted);
-}
-.station-controls > .eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 15px;
-}
-#source-status {
-  font-size: 0.75rem;
-  letter-spacing: 0.7px;
-  margin-left: auto;
 }
 .status-dot {
   width: 5px;
@@ -1313,17 +1301,9 @@ body.resizing {
   .station-controls {
     padding: 6px 18px 8px;
   }
-  .station-controls > .eyebrow,
-  #station-meta {
-    display: none;
-  }
   .station-controls select {
     font-size: 0.9375rem;
     padding: 7px;
-  }
-  .station-controls #map-subtitle {
-    margin: 4px 0 0;
-    font-size: 0.75rem;
   }
   .sidebar-tabs {
     padding-inline: 18px;

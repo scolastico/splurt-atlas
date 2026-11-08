@@ -84,12 +84,19 @@ export function createTileRenderer({ db, sprites, tilePixels }) {
       const underfloor =
         channel === 'base'
           ? atoms.filter(
-              (atom) => underCatwalk(atom, atoms, db) || beaconVisibility(atom, atoms, db) === 'underfloor',
+              (atom) =>
+                !atom.vars?.atlas_random_marker &&
+                !atom.vars?.atlas_random_preview &&
+                (underCatwalk(atom, atoms, db) || beaconVisibility(atom, atoms, db) === 'underfloor'),
             )
           : [];
       const selected = atoms.filter(
         (atom) =>
-          (bakedChannel(atom, atoms, db) === channel || underfloor.includes(atom)) && !invisible(atom),
+          ((channel === 'foreground-mapper'
+            ? bakedChannel(atom, atoms, db) === 'foreground' && atom.vars?.atlas_random_preview !== '1'
+            : bakedChannel(atom, atoms, db) === channel) ||
+            underfloor.includes(atom)) &&
+          (atom.vars?.atlas_random_marker === '1' || !invisible(atom)),
       );
       const key = JSON.stringify([selected, underfloor]);
       let job = cache.get(key);

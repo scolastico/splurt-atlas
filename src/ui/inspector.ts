@@ -19,6 +19,7 @@ import type {
 } from '../core/types.ts';
 import { share } from './url-state.ts';
 import { viewFragment } from '../model/view-state.ts';
+import { randomPreviewMarkup } from '../model/random-preview.ts';
 
 /** The finding shown with the selection, if the selection came from a search result. */
 let inspectedResult: (SearchRecord & { spawner?: string }) | null = null;
@@ -370,6 +371,10 @@ export function paintInspector(): void {
   const detailed = isChecked('detailed-view');
   const inspector = $('inspector');
   inspector.innerHTML = detailed ? detailedHtml : friendlyMarkup(x, y, z, definition);
+  inspector.insertAdjacentHTML(
+    'beforeend',
+    randomPreviewMarkup(definition.atoms, isChecked('random-markers')),
+  );
   if (detailed && tileCandidates.length) {
     const candidates = document.createElement('details');
     candidates.open = true;

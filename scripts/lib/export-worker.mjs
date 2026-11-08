@@ -25,6 +25,7 @@ import { createNaturalTerrain } from './runtime-terrain.mjs';
 import { buildRooms, buildSearchItems } from './spawn-records.mjs';
 import { createTileRenderer } from './tile-renderer.mjs';
 import { placeRoundstartShuttles } from './roundstart-shuttles.mjs';
+import { randomAppearances } from './random-appearances.mjs';
 
 /** Per-cell appearances: expanded structures, smoothed neighbors, resolved random posters. */
 function buildAppearances(map, db) {
@@ -32,7 +33,7 @@ function buildAppearances(map, db) {
   const expanded = new Map([...dictionary].map(([key, atoms]) => [key, expandStructures(atoms, db)]));
   const spatial = new Map(cells.map((cell) => [`${cell.x},${cell.y},${cell.z}`, expanded.get(cell.key)]));
   const at = (x, y, z) => spatial.get(`${x},${y},${z}`);
-  for (const cell of cells)
+  for (const cell of cells) {
     cell.appearance = randomiseTrash(
       randomisePosters(
         smoothAtoms(expanded.get(cell.key), cell.x, cell.y, cell.z, at, db),
@@ -46,6 +47,15 @@ function buildAppearances(map, db) {
       cell.z,
       db,
     );
+    cell.appearance = randomAppearances(
+      cell.appearance,
+      dictionary.get(cell.key),
+      cell.x,
+      cell.y,
+      cell.z,
+      db,
+    );
+  }
   return { expanded, at };
 }
 

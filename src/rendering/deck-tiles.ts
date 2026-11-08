@@ -211,6 +211,7 @@ function deckChannels(z: number): string[] {
     isChecked('mapping-helpers'),
     infrastructureOrder,
     isChecked('power-networks'),
+    isChecked('random-markers'),
   );
 }
 

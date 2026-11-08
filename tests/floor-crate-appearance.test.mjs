@@ -13,8 +13,9 @@ test('transit tubes draw over walls/windows on the viewed deck and respect their
   assert.ok(!channelsForDeck(true, new Set(), false, false).includes('transit'));
   assert.deepEqual(channelsForDeck(false, new Set(['transit']), false, true), [
     'base',
-    'foreground',
+    'pipes-floor-equipment',
     'pipes-equipment',
+    'foreground',
   ]);
 });
 

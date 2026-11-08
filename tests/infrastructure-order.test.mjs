@@ -62,7 +62,7 @@ test('atmos equipment stays visible and above its own network, including in reve
     assert.ok(enabled.indexOf('pipes-equipment') > enabled.indexOf(simple ? 'pipes-symbols' : 'pipes'));
     const ordinary = channelsForDeck(true, new Set(), simple, false);
     assert.ok(ordinary.includes('pipes-equipment'));
-    assert.ok(ordinary.indexOf('pipes-equipment') > ordinary.indexOf('foreground'));
+    assert.ok(ordinary.indexOf('pipes-equipment') < ordinary.indexOf('foreground'));
   }
   assert.equal(
     bakedChannel({ path: '/obj/machinery/meter', vars: {} }, [], { resolve: () => ({}) }),
@@ -130,7 +130,7 @@ test('vents use runtime bodies and retain concealed connectors for the Atmospher
   const body = atoms.find((a) => a.path === vent && !a.vars.icon?.includes('underlays'));
   const cap = atoms.find((a) => a.vars.icon?.includes('pipe_underlays'));
   assert.equal(body.vars.icon_state, '"vent_out"');
-  assert.equal(bakedChannel(body, atoms, db), 'pipes-equipment');
+  assert.equal(bakedChannel(body, atoms, db), 'pipes-floor-equipment');
   assert.ok(cap);
   assert.equal(bakedChannel(cap, atoms, db), 'pipes');
   // Even always-visible pumps must not force their connector above intact flooring.

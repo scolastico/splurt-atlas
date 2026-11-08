@@ -9,6 +9,22 @@ export function objectOffsets(type, vars, db) {
       result[key] = resolved === 'null' ? '0' : resolved;
     }
   const dir = Number(value(vars.dir || '2'));
+  if (
+    type.includes('/atmospherics/components/') &&
+    ['FALSE', '0'].includes(String(value(vars.shift_underlay_only || 'TRUE')))
+  ) {
+    // PIPING_LAYER_SHIFT moves only the axis perpendicular to the device's
+    // ports. Keep the configured layer in the atlas reveal view as well.
+    const layer = Number(value(vars.piping_layer || '3'));
+    const componentDir = Number(value(vars.atlas_component_dir || vars.dir || '2'));
+    const xStep = Number(value('PIPING_LAYER_P_X'));
+    const yStep = Number(value('PIPING_LAYER_P_Y'));
+    const floating = Number(value(vars.layer || '3')) <= -1;
+    if (componentDir & 3)
+      result[floating ? 'pixel_w' : 'pixel_x'] = String((layer - 3) * (Number.isFinite(xStep) ? xStep : 5));
+    if (componentDir & 12)
+      result[floating ? 'pixel_z' : 'pixel_y'] = String((layer - 3) * (Number.isFinite(yStep) ? yStep : 5));
+  }
   if (/^\/obj\/machinery\/power\/apc(?:\/|$)/.test(type)) {
     // APC Initialize(mapload) always calls setDir, including non-helper subtypes.
     const shift = Number(value('APC_PIXEL_OFFSET'));

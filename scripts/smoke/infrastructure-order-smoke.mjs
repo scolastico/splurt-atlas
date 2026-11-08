@@ -59,6 +59,48 @@ try {
   const context = await browser.newContext({ viewport: { width: 1200, height: 1000 } });
   const page = await openPage(context);
   assert.deepEqual(await order(page), defaultOrder);
+  assert.equal(await page.locator('.station-controls .eyebrow, #source-status').count(), 0);
+  assert.equal(
+    await page.locator('.station-controls #station-meta, .station-controls #map-subtitle').count(),
+    0,
+  );
+  assert.equal(await page.locator('#map-statistics #station-meta, #map-statistics #map-subtitle').count(), 2);
+  assert.equal(
+    await page.locator('#source-link').evaluate((node) => node.nextElementSibling?.id),
+    'commit-link',
+  );
+  assert.match(await page.locator('#commit-link').textContent(), /^Upstream commit /);
+  assert.equal(await page.locator('#atlas-source').isVisible(), true);
+  assert.equal(
+    await page.locator('#atlas-source').getAttribute('href'),
+    'https://github.com/scolastico/splurt-atlas',
+  );
+  assert.ok(
+    !(await page.locator('.sidebar-bottom').textContent()).includes(
+      'Mapped positions, before the round begins.',
+    ),
+  );
+  assert.equal(
+    await page.locator('#cache-status').count(),
+    1,
+    'offline status must not have a stale duplicate',
+  );
+  assert.equal(await page.locator('#offline-storage-info #cache-status').count(), 1);
+  assert.equal(await page.locator('#cache-status').isHidden(), true);
+  await page.evaluate(async () => {
+    const { assetCache } = await import('/src/data/source.ts');
+    assetCache.setMode('none');
+  });
+  assert.equal(await page.locator('#cache-status').textContent(), 'Offline storage is off.');
+  await page.locator('[popovertarget="offline-storage-info"]').hover();
+  await page.locator('#offline-storage-info').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#cache-status').isVisible(), true);
+  await page.mouse.move(700, 100);
+  await page.locator('#offline-storage-info').waitFor({ state: 'hidden' });
+  await page.locator('#random-markers').check();
+  await page.waitForFunction(
+    () => !!(Number(new URLSearchParams(location.hash.slice(1)).get('o')) & (1 << 19)),
+  );
   assert.equal(await page.locator('#network-controls #transit').count(), 0);
   assert.equal(await page.locator('#transit').isVisible(), true);
   assert.equal(await page.locator('#reset-infrastructure-order').isDisabled(), true);
@@ -91,6 +133,7 @@ try {
   const shared = page.url();
   await page.reload();
   await page.waitForFunction(() => window.fixtureReady);
+  assert.equal(await page.locator('#random-markers').isChecked(), true);
   assert.deepEqual(await order(page), custom);
   const handle = page.locator('[data-network="disposal"] button');
   await handle.focus();

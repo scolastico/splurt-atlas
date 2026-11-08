@@ -96,14 +96,6 @@ export function expandStructures(atoms, db, depth = 0) {
                   : 'scrub_on';
         if (!db.hasIconState || db.hasIconState(unquote(vars.icon), body)) {
           const bodyVars = { ...atom.vars, icon_state: JSON.stringify(body) };
-          if (['FALSE', '0'].includes(literal(vars.shift_underlay_only || 'TRUE'))) {
-            const turf = atoms.find((item) => item.path.startsWith('/turf/'));
-            const floor = turf ? { ...db.resolve(turf.path), ...turf.vars } : {};
-            const exposed = Number(literal(floor.underfloor_accessibility || '0')) >= 1;
-            const layer = Number(literal(vars.piping_layer || '3'));
-            const offset = exposed ? (layer - 3) * 5 : 0;
-            bodyVars.pixel_x = bodyVars.pixel_y = String(offset);
-          }
           return [{ ...atom, vars: bodyVars }];
         }
       }

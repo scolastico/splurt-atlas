@@ -44,6 +44,10 @@ function initDisplayToggles(): void {
     }
   };
   checkbox('mapping-helpers').onchange = redraw;
+  checkbox('random-markers').onchange = () => {
+    paintInspector();
+    redraw();
+  };
   checkbox('motion').checked = state.motion = !reducedMotion.matches;
   reducedMotion.addEventListener('change', (event) => {
     state.motion = checkbox('motion').checked = !event.matches;
@@ -95,7 +99,7 @@ async function boot(): Promise<void> {
     const repository = manifest.repository.replace(/\.git$/, '');
     $<HTMLAnchorElement>('source-link').href = repository;
     $<HTMLAnchorElement>('commit-link').href = `${repository}/commit/${manifest.commit}`;
-    $('commit-link').textContent = `${manifest.commit.slice(0, 12)} ↗`;
+    $('upstream-commit').textContent = manifest.commit.slice(0, 12);
     fillStationSelect();
     const id = currentHashParams().get('m');
     if (id && manifest.maps.some((map) => map.id === id)) {

@@ -36,7 +36,7 @@ try {
   assert.equal(await page.locator('#map-picker .eyebrow').count(), 0);
   await page.locator('.map-card').filter({ hasText: 'Tramstation' }).click();
   await page.locator('#loading').waitFor({ state: 'hidden', timeout: 120000 });
-  await page.waitForFunction(() => document.querySelector('#source-status').textContent === 'ARCHIVE READY');
+  assert.equal(await page.locator('#source-status').count(), 0);
   await page.waitForFunction(() =>
     document.querySelector('#search-status').textContent.includes('Search rooms'),
   );

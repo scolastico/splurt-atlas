@@ -5,6 +5,19 @@ import { pretty, unquote } from './dm.mjs';
 /** Spawners nested deeper than this are not followed. */
 const MAX_SPAWNER_DEPTH = 12;
 const closetMethods = new WeakMap();
+const subtypePools = new WeakMap();
+
+function subtypePool(db, base, includeBase) {
+  if (!subtypePools.has(db)) subtypePools.set(db, new Map());
+  const cache = subtypePools.get(db),
+    key = `${base}:${includeBase}`;
+  if (!cache.has(key))
+    cache.set(key, [
+      ...(includeBase ? [base] : []),
+      ...[...(db.types?.keys() || [])].filter((type) => type.startsWith(base + '/')),
+    ]);
+  return cache.get(key);
+}
 
 /** Literal item constructions inside population methods, including conditional contents.
  * These are candidates, since conditions and random rolls are not executed. */
@@ -58,6 +71,13 @@ export function spawnCandidates(db, type, vars, seen = new Set()) {
   if (seen.has(type) || seen.size > MAX_SPAWNER_DEPTH) return [];
   seen.add(type);
   let paths = vars.loot?.match(/\/(?:obj|mob)\/[\w/]+/g) || [];
+  for (const [property, includeBase] of [
+    ['loot_type_path', true],
+    ['loot_subtype_path', false],
+  ]) {
+    const base = db.literal ? db.literal(vars[property] || '') : vars[property];
+    if (/^\/(obj|mob)\//.test(base || '')) paths = [...paths, ...subtypePool(db, base, includeBase)];
+  }
   if (type.includes('/spawner/random/maintenance'))
     paths = [
       ...paths,

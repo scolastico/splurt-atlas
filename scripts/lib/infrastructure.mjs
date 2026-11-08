@@ -63,6 +63,7 @@ export function buildInfrastructure(cells, at, db, levels) {
   const vars = (a) => ({ ...db.resolve(a.path), ...a.vars });
   for (const cell of cells) {
     for (const [atomIndex, atom] of cell.appearance.entries()) {
+      if (atom.vars?.atlas_random_marker === '1') continue;
       const channel = classify(atom.path);
       if (
         !['power', 'pipes', 'fluid'].includes(channel) ||
@@ -321,6 +322,7 @@ export function buildInfrastructure(cells, at, db, levels) {
             icon: `'${icon}'`,
             icon_state: JSON.stringify(state),
             dir: '2',
+            atlas_component_dir: String(v.dir || '2'),
             color: JSON.stringify(node?.color || n.color),
             layer: '2.475',
           },

@@ -50,7 +50,10 @@ export function initInfoPopovers(): void {
     document.addEventListener(
       'scroll',
       (event) => {
-        if (!(event.target instanceof Node) || !popup.contains(event.target)) hide();
+        if (event.target instanceof Node && popup.contains(event.target)) return;
+        if (popup.matches(':popover-open') && (button.matches(':hover') || document.activeElement === button))
+          place();
+        else hide();
       },
       { capture: true, passive: true },
     );
