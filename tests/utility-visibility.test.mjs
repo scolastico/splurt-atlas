@@ -37,7 +37,7 @@ test('exposed utilities remain in always-visible channels while covered pipes, c
   const bin = atom('/obj/machinery/disposal');
   assert.equal(renderChannel(bin, [closed, bin], db), 'disposal-surface');
   assert.equal(bakedChannel(atom('/obj/structure/lattice'), [closed], db), 'base');
-  assert.equal(bakedChannel(atom('/obj/machinery/meter'), [closed], db), 'foreground');
+  assert.equal(bakedChannel(atom('/obj/machinery/meter'), [closed], db), 'pipes-equipment');
   assert.equal(
     bakedChannel(atom('/obj/machinery/portable_atmospherics/canister'), [closed], db),
     'foreground',
@@ -56,7 +56,7 @@ test('atmospherics components stay visible under intact floors while their pipe 
   const closed = { path: '/turf/open/floor/iron', vars: {} },
     vent = { path: '/obj/machinery/atmospherics/components/unary/vent_scrubber', vars: {} };
   assert.equal(renderChannel(vent, [closed, vent], db), 'pipes');
-  assert.equal(bakedChannel(vent, [closed, vent], db), 'foreground');
+  assert.equal(bakedChannel(vent, [closed, vent], db), 'pipes-equipment');
   const cap = {
     ...vent,
     vars: { icon: "'icons/obj/pipes_n_cables/pipe_underlays.dmi'", icon_state: '"intact_1_3"' },

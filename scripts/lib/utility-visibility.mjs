@@ -1,6 +1,7 @@
 import { classify } from './dm.mjs';
 
 export function utilityExposed(atom, atoms, db) {
+  if (/^\/obj\/machinery\/meter(?:\/|$)/.test(atom.path)) return true;
   if (underCatwalk(atom, atoms, db)) return false;
   const channel = classify(atom.path),
     vars = { ...db.resolve(atom.path), ...atom.vars };
@@ -14,6 +15,9 @@ export function utilityExposed(atom, atoms, db) {
       ? Number(accessibility) >= 1
       : /\/(plating|space|openspace|glass|catwalk)(?:\/|$)/.test(turf?.path || '');
   if (channel === 'pipes') {
+    // Generated connector images inherit the component's type, but not its
+    // permanently exposed machinery body. Their visibility follows the turf.
+    if (String(atom.vars?.icon || '').includes('pipe_underlays')) return uncovered;
     const hide = literal(vars.hide);
     return ['FALSE', '0'].includes(hide) || (!hide && atom.path.includes('/components/')) || uncovered;
   }
@@ -30,14 +34,21 @@ export function renderChannel(atom, atoms, db) {
 }
 /** Visible through the grate, but only revealed above it by the network toggle. */
 export function underCatwalk(atom, atoms, db) {
+  if (/^\/obj\/machinery\/meter(?:\/|$)/.test(atom.path)) return false;
   if (!atoms.some((item) => /\/catwalk(?:_floor)?(?:\/|$)/.test(item.path))) return false;
   const channel = classify(atom.path);
   if (channel === 'navigation') return beaconVisibility(atom, atoms, db) === 'underfloor';
   if (!channel || channel === 'transit') return false;
-  if (channel === 'pipes' && atom.path.includes('/components/')) return false;
+  if (
+    channel === 'pipes' &&
+    atom.path.includes('/components/') &&
+    !String(atom.vars?.icon || '').includes('pipe_underlays')
+  )
+    return false;
   if (channel === 'disposal' && !/^\/obj\/structure\/disposal(pipe|construct)(?:\/|$)/.test(atom.path))
     return false;
   const vars = { ...db.resolve(atom.path), ...atom.vars };
+  if (channel === 'pipes' && String(atom.vars?.icon || '').includes('pipe_underlays')) return true;
   if (channel === 'pipes' && ['FALSE', '0'].includes(String(db.literal ? db.literal(vars.hide) : vars.hide)))
     return false;
   return true;
@@ -65,6 +76,7 @@ export function beaconVisibility(atom, atoms, db) {
 export function bakedChannel(atom, atoms, db) {
   // Mapping helpers only guide mappers (mail sorting, access, lighting...); they never exist in a round.
   if (MAPPING_HELPER.test(atom.path)) return 'helpers';
+  if (/^\/obj\/machinery\/meter(?:\/|$)/.test(atom.path)) return 'pipes-equipment';
   const beacon = beaconVisibility(atom, atoms, db);
   if (beacon) return beacon === 'surface' ? 'navigation-surface' : 'navigation';
   // Atmospherics components (vents, scrubbers, pumps...) stay visible under intact floors; only their pipe caps hide.
@@ -73,7 +85,7 @@ export function bakedChannel(atom, atoms, db) {
     atom.path.includes('/components/') &&
     !String(atom.vars?.icon || '').includes('pipe_underlays')
   )
-    return 'foreground';
+    return 'pipes-equipment';
   const channel = renderChannel(atom, atoms, db);
   if (channel.endsWith('-surface')) {
     if (
@@ -81,7 +93,7 @@ export function bakedChannel(atom, atoms, db) {
       !/^\/obj\/structure\/disposal(pipe|construct)(?:\/|$)/.test(atom.path)
     )
       return 'foreground';
-    if (channel === 'pipes-surface' && atom.path.includes('/components/')) return 'foreground';
+    if (channel === 'pipes-surface' && atom.path.includes('/components/')) return 'pipes-equipment';
     return channel;
   }
   if (/^\/obj\/structure\/(lattice|catwalk)(?:\/|$)/.test(atom.path)) return 'base';

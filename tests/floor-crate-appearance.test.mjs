@@ -11,7 +11,11 @@ test('transit tubes draw over walls/windows on the viewed deck and respect their
   assert.ok(channels.indexOf('transit') > channels.indexOf('foreground'));
   assert.ok(channels.indexOf('helpers') > channels.indexOf('transit'));
   assert.ok(!channelsForDeck(true, new Set(), false, false).includes('transit'));
-  assert.deepEqual(channelsForDeck(false, new Set(['transit']), false, true), ['base', 'foreground']);
+  assert.deepEqual(channelsForDeck(false, new Set(['transit']), false, true), [
+    'base',
+    'foreground',
+    'pipes-equipment',
+  ]);
 });
 
 test('beacon infrastructure toggles reveal hidden devices while exposed sprites remain visible', () => {

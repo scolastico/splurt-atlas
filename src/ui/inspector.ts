@@ -7,7 +7,7 @@ import { setSidebarCollapsed, showSidebarView } from './layout.ts';
 import { tileCenterX, tileCenterY } from '../rendering/projection.ts';
 import { recordJump } from './history.ts';
 import { clearFinding, requestTileCandidates } from './search.ts';
-import { definitionAt, networkNames, palette, state } from '../core/state.ts';
+import { definitionAt, infrastructureOrder, networkNames, palette, state } from '../core/state.ts';
 import { setDeck } from './station.ts';
 import type {
   Atom,
@@ -217,6 +217,7 @@ function controlLink(control: DoorControl): HTMLAnchorElement {
   link.textContent = `${control.name} - Deck ${control.z} · ${control.x}, ${control.y}`;
   link.href = viewFragment({
     ...state,
+    infrastructureOrder,
     map,
     z: control.z,
     x: tileCenterX(control.x),

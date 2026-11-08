@@ -207,6 +207,7 @@ export function loadTypes(root) {
 }
 
 export function classify(type) {
+  if (/^\/obj\/machinery\/meter(?:\/|$)/.test(type)) return 'pipes';
   if (/^\/obj\/machinery\/navbeacon(?:\/|$)/.test(type)) return 'navigation';
   if (/^\/obj\/machinery\/duct(?:\/|$)/.test(type)) return 'fluid';
   if (/\/atmospherics\//.test(type)) return 'pipes';

@@ -7,7 +7,6 @@ import { $, isChecked } from '../core/dom.ts';
 import { paintNow, redraw, setFramePainter } from '../core/frame.ts';
 import { updateHighlightOverlay } from './highlight-overlay.ts';
 import { beginFrame, trimImages } from './images.ts';
-import { drawInfrastructure } from './infrastructure-overlay.ts';
 import { isSidebarAnimating } from '../ui/layout.ts';
 import { resizeBackground, updateSpaceAnimation } from './space-background.ts';
 import { state, TILE } from '../core/state.ts';
@@ -74,19 +73,13 @@ function paintFrame(): void {
     drawDeck(state.z, 0);
   }
   renderer.end();
-  const wantAnnotations =
-    drawable &&
-    (state.regions ||
-      isChecked('simple-utilities') ||
-      isChecked('power-networks') ||
-      state.selected?.z === state.z);
+  const wantAnnotations = drawable && (state.regions || state.selected?.z === state.z);
   if (wantAnnotations || annotationsPainted) {
     annotationContext.setTransform(1, 0, 0, 1, 0, 0);
     annotationContext.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
     annotationsPainted = false;
   }
   if (wantAnnotations) {
-    drawInfrastructure(annotationContext);
     drawAnnotations(annotationContext);
     annotationsPainted = true;
   }

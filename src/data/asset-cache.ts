@@ -198,6 +198,34 @@ export class AssetCache {
     this.warmAbort?.abort();
   }
 
+  /** Stop downloads/writes, close our connection and delete every stored atlas asset/ZIP. */
+  async deleteAll(): Promise<void> {
+    this.mode = null;
+    this.stopWarm();
+    this.buffer.clear();
+    if (this.writeTimer) {
+      clearTimeout(this.writeTimer);
+      this.writeTimer = 0;
+    }
+    if (this.archiveWarming) await this.archiveWarming.catch(() => {});
+    if (this.flushing) await this.flushing;
+    const db = await this.database;
+    await this.keysReady;
+    db?.close();
+    if (globalThis.indexedDB)
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(DATABASE);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error || new Error('Could not delete offline maps.'));
+        request.onblocked = () =>
+          reject(new Error('Close other atlas tabs, then retry deleting local data.'));
+      });
+    this.keys?.clear();
+    this.readyMaps?.clear();
+    this.pending.clear();
+    this.currentMap = null;
+  }
+
   // --- Reading and writing single assets ---------------------------------
 
   async read(key: string): Promise<Blob | null> {

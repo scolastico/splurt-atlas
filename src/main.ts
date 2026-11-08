@@ -7,7 +7,7 @@ import { assetCache, catalogBase, fetchManifest, setDataBase } from './data/sour
 import { initDoorRoles } from './ui/door-roles.ts';
 import { $, checkbox } from './core/dom.ts';
 import { redraw } from './core/frame.ts';
-import { initNetworkControls } from './rendering/infrastructure-overlay.ts';
+import { initNetworkControls } from './ui/infrastructure-controls.ts';
 import { initHistory } from './ui/history.ts';
 import { clearInspectedResult, initInspector, paintInspector } from './ui/inspector.ts';
 import { initLayout, showSidebarView } from './ui/layout.ts';
@@ -19,6 +19,7 @@ import { reducedMotion, state } from './core/state.ts';
 import { loadStation, showMapPicker } from './ui/station.ts';
 import { chooseStorage, initStorageSettings, warmStorage } from './ui/storage-settings.ts';
 import { currentHashParams, initOptionSharing, restoreOptions } from './ui/url-state.ts';
+import { initInfoPopovers } from './ui/info-popovers.ts';
 
 function initSourceLink(): void {
   const url = import.meta.env.VITE_ATLAS_SOURCE_URL;
@@ -115,6 +116,7 @@ initLayout(() => {
 });
 initStorageSettings();
 initNetworkControls();
+initInfoPopovers();
 initDoorRoles();
 initSearch(() => {
   clearInspectedResult();

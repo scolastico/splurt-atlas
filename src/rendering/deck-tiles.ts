@@ -15,7 +15,8 @@ import {
 } from './images.ts';
 import { setLoading } from '../ui/loading.ts';
 import { screenCenterX, screenCenterY } from './projection.ts';
-import { enabledNetworks, state, type DeckLevel } from '../core/state.ts';
+import { enabledNetworks, infrastructureOrder, state, type DeckLevel } from '../core/state.ts';
+import { drawUtilitySymbols } from './infrastructure-overlay.ts';
 import { deckScale, detailForZoom, type Detail } from '../model/view-state.ts';
 import { slotIndex, stripName } from '../../scripts/lib/map-format.mjs';
 import { channelsForDeck } from '../model/deck-channels.ts';
@@ -208,6 +209,8 @@ function deckChannels(z: number): string[] {
     enabledNetworks,
     isChecked('simple-utilities') && !!state.map!.infrastructure?.nodes?.length,
     isChecked('mapping-helpers'),
+    infrastructureOrder,
+    isChecked('power-networks'),
   );
 }
 
@@ -244,7 +247,11 @@ export function drawDeck(z: number, shade: number): void {
   prefetchAhead(z, set);
   const sources = set.items.map((item) => tileSources(z, item));
   renderer.beginDeck(shade);
-  for (const channel of deckChannels(z))
+  for (const channel of deckChannels(z)) {
+    if (channel.includes('-symbols')) {
+      drawUtilitySymbols(channel, scale, centerX, centerY);
+      continue;
+    }
     for (const [index, item] of set.items.entries())
       for (const source of sources[index]) {
         const slot = slotIndex(source.mask, channel);
@@ -264,6 +271,7 @@ export function drawDeck(z: number, shade: number): void {
         }
         break;
       }
+  }
   renderer.endDeck();
 }
 

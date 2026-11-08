@@ -68,6 +68,46 @@ export function expandStructures(atoms, db, depth = 0) {
   if (depth > 8) return atoms;
   return atoms.flatMap((atom) => {
     const vars = { ...db.resolve(atom.path), ...atom.vars };
+    if (atom.path.includes('/atmospherics/components/')) {
+      const state = unquote(vars.icon_state);
+      if (state.includes('_map')) {
+        const literal = (value) => (db.literal ? db.literal(String(value)) : String(value));
+        const flag = (key) => ['TRUE', '1'].includes(literal(vars[key] || 'FALSE'));
+        let body = state.replace(/_map(?=-|$)/, '').replace(/-\d+$/, '');
+        if (/\/vent_pump(?:\/|$)/.test(atom.path))
+          body = flag('welded')
+            ? 'vent_welded'
+            : !flag('on')
+              ? 'vent_off'
+              : literal(vars.pump_direction || 'ATMOS_DIRECTION_RELEASING') ===
+                  literal('ATMOS_DIRECTION_RELEASING')
+                ? 'vent_out'
+                : 'vent_in';
+        else if (/\/vent_scrubber(?:\/|$)/.test(atom.path))
+          body = flag('welded')
+            ? 'scrub_welded'
+            : !flag('on')
+              ? 'scrub_off'
+              : literal(vars.scrubbing || 'ATMOS_DIRECTION_SCRUBBING') !==
+                  literal('ATMOS_DIRECTION_SCRUBBING')
+                ? 'scrub_purge'
+                : flag('widenet')
+                  ? 'scrub_wide'
+                  : 'scrub_on';
+        if (!db.hasIconState || db.hasIconState(unquote(vars.icon), body)) {
+          const bodyVars = { ...atom.vars, icon_state: JSON.stringify(body) };
+          if (['FALSE', '0'].includes(literal(vars.shift_underlay_only || 'TRUE'))) {
+            const turf = atoms.find((item) => item.path.startsWith('/turf/'));
+            const floor = turf ? { ...db.resolve(turf.path), ...turf.vars } : {};
+            const exposed = Number(literal(floor.underfloor_accessibility || '0')) >= 1;
+            const layer = Number(literal(vars.piping_layer || '3'));
+            const offset = exposed ? (layer - 3) * 5 : 0;
+            bodyVars.pixel_x = bodyVars.pixel_y = String(offset);
+          }
+          return [{ ...atom, vars: bodyVars }];
+        }
+      }
+    }
     if (/^\/turf\/open\/floor\/catwalk_floor(?:\/|$)/.test(atom.path)) {
       const base = unquote(vars.catwalk_type || '"maint"');
       const covered = !['FALSE', '0'].includes(String(db.literal ? db.literal(vars.covered) : vars.covered));

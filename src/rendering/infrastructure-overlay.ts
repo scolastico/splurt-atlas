@@ -1,108 +1,116 @@
-// The utility network toggles and the "simple utility symbols" overlay that
-// replaces cable and pipe sprites with lightweight crosses.
-import { $, isChecked } from '../core/dom.ts';
+// Utility symbols share the sprite layer stack, including user-defined order.
+import { isChecked } from '../core/dom.ts';
 import { redraw } from '../core/frame.ts';
-import { applyWorldTransform, tileCenterX, tileCenterY } from './projection.ts';
-import { enabledNetworks, networkNames, palette, state } from '../core/state.ts';
-import type { Network } from '../core/types.ts';
+import { state, TILE } from '../core/state.ts';
+import type { InfrastructureNode } from '../core/types.ts';
+import { renderer } from './canvases.ts';
+import type { TextureHandle } from './gl-renderer.ts';
+import { utilitySymbolOffset } from '../model/infrastructure-order.ts';
 
-/** NORTH, SOUTH, EAST, WEST port bits with their unit direction. */
-const PORTS: [number, number, number][] = [
+const PORTS = [
   [1, 0, -1],
   [2, 0, 1],
   [4, 1, 0],
   [8, -1, 0],
 ];
-const ALL_PORTS = 15;
+const textures = new Map<string, { handle?: TextureHandle }>();
+let textureGeneration = 0;
+let cachedNodes: InfrastructureNode[] | undefined;
+let cachedKey = '';
+let groups = new Map<string, InfrastructureNode[]>();
 
-/** Stroke paths per color, cached per deck and toggle combination. */
-const utilityPaths = new Map<string, Map<string, Path2D>>();
-
-/** Drops the cached paths after a toggle or deck change. */
 export function invalidateUtilityPaths(): void {
-  utilityPaths.clear();
+  cachedKey = '';
 }
 
-/** The color that distinguishes separate power networks. */
-function networkColor(network: number): string {
-  return `hsl(${(network * 137.508) % 360} 85% 70%)`;
-}
-
-function buildUtilityPaths(simple: boolean, colored: boolean): Map<string, Path2D> {
-  const map = state.map!;
-  const paths = new Map<string, Path2D>();
-  for (const node of map.infrastructure!.nodes) {
-    if (!['power', 'pipes'].includes(node.channel) || node.z !== state.z) continue;
-    if (!enabledNetworks.has(node.channel) && !node.exposed) continue;
-    const coloredPower = colored && node.channel === 'power';
-    if (simple && node.simpleEligible === false && !coloredPower) continue;
-    if (!simple && !coloredPower) continue;
-    const color = coloredPower ? networkColor(node.network) : node.color;
-    let path = paths.get(color);
-    if (!path) paths.set(color, (path = new Path2D()));
-    const x = tileCenterX(node.x);
-    const y = tileCenterY(node.y);
-    const ports = simple ? ALL_PORTS : node.links;
-    for (const [bit, dx, dy] of PORTS)
-      if (ports & bit) {
-        path.moveTo(x, y);
-        path.lineTo(x + dx * 16, y + dy * 16);
-      }
-    if (!ports) {
-      path.moveTo(x - 3, y);
-      path.lineTo(x + 3, y);
-    }
-  }
-  return paths;
-}
-
-export function drawInfrastructure(context: CanvasRenderingContext2D): void {
-  if (!state.map?.infrastructure) return;
-  const simple = isChecked('simple-utilities');
-  const colored = isChecked('power-networks');
-  if (!simple && !colored) return;
-  applyWorldTransform(context);
-  const key = `${state.z}:${simple}:${colored}:${[...enabledNetworks].sort()}`;
-  let paths = utilityPaths.get(key);
-  if (!paths) utilityPaths.set(key, (paths = buildUtilityPaths(simple, colored)));
+function texture(color: string, ports: number): TextureHandle | undefined {
+  const key = `${color}:${ports}`;
+  const cached = textures.get(key);
+  if (cached) return cached.handle;
+  const entry: { handle?: TextureHandle } = {};
+  textures.set(key, entry);
+  const generation = textureGeneration;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = TILE;
+  const context = canvas.getContext('2d')!;
   context.lineCap = 'round';
-  for (const [color, path] of paths) {
-    context.strokeStyle = '#0c1729';
-    context.lineWidth = 5;
-    context.stroke(path);
-    context.strokeStyle = color;
-    context.lineWidth = 2.5;
-    context.stroke(path);
+  context.beginPath();
+  for (const [bit, dx, dy] of PORTS)
+    if (ports & bit) {
+      context.moveTo(16, 16);
+      context.lineTo(16 + dx * 16, 16 + dy * 16);
+    }
+  if (!ports) {
+    context.moveTo(13, 16);
+    context.lineTo(19, 16);
   }
-  context.lineCap = 'butt';
+  context.strokeStyle = '#0c1729';
+  context.lineWidth = 5;
+  context.stroke();
+  context.strokeStyle = color;
+  context.lineWidth = 2.5;
+  context.stroke();
+  void createImageBitmap(canvas)
+    .then((bitmap) => renderer.prepare(bitmap, 1))
+    .then((handle) => {
+      if (generation !== textureGeneration) {
+        renderer.release(handle);
+        return;
+      }
+      entry.handle = handle;
+      redraw();
+    })
+    .catch(() => {});
+  return undefined;
 }
 
-/** Creates one checkbox per utility network in the sidebar. */
-export function initNetworkControls(): void {
-  for (const key of Object.keys(palette) as Network[]) {
-    const label = document.createElement('label');
-    label.className = 'toggle-row';
-    label.innerHTML = `<span>${networkNames[key]}</span><input type="checkbox" aria-label="${networkNames[key]}">`;
-    const input = label.querySelector('input')!;
-    input.onchange = () => {
-      if (input.checked) enabledNetworks.add(key);
-      else enabledNetworks.delete(key);
-      redraw();
-    };
-    input.checked = enabledNetworks.has(key);
-    input.id = key;
-    $('network-controls').append(label);
+export function drawUtilitySymbols(channel: string, scale: number, centerX: number, centerY: number): void {
+  const nodes = state.map?.infrastructure?.nodes;
+  if (!nodes) return;
+  if (nodes !== cachedNodes) {
+    for (const entry of textures.values()) if (entry.handle) renderer.release(entry.handle);
+    textures.clear();
+    textureGeneration++;
+    cachedNodes = nodes;
+    cachedKey = '';
   }
-  for (const key of ['power-networks', 'simple-utilities', 'connections', 'connection-labels'])
-    $(key).onchange = () => {
-      // Coloring power networks implies showing the power layer.
-      if (key === 'power-networks' && isChecked('power-networks')) {
-        enabledNetworks.add('power');
-        document.querySelector<HTMLInputElement>(
-          '#network-controls input[aria-label="Power cables"]',
-        )!.checked = true;
-      }
-      invalidateUtilityPaths();
-      redraw();
-    };
+  const simple = isChecked('simple-utilities'),
+    colored = isChecked('power-networks');
+  const key = `${state.z}:${simple}:${colored}`;
+  if (cachedKey !== key) {
+    groups = new Map();
+    for (const node of nodes) {
+      if (node.z !== state.z || !['power', 'pipes'].includes(node.channel)) continue;
+      const coloredPower = colored && node.channel === 'power';
+      if ((!simple && !coloredPower) || (simple && node.simpleEligible === false && !coloredPower)) continue;
+      const group = `${node.channel}-symbols${node.exposed ? '-surface' : ''}`;
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group)!.push(node);
+    }
+    for (const group of groups.values()) group.sort((a, b) => a.layer - b.layer);
+    cachedKey = key;
+  }
+  for (const node of groups.get(channel) || []) {
+    const offset = utilitySymbolOffset(node.channel, node.layer);
+    const x = ((node.x - 1) * TILE + offset - state.x) * scale + centerX;
+    const y = ((state.map!.height - node.y) * TILE - offset - state.y) * scale + centerY;
+    const size = TILE * scale;
+    if (x + size < 0 || y + size < 0 || x > state.w || y > state.h) continue;
+    const color =
+      colored && node.channel === 'power' ? `hsl(${(node.network * 137.508) % 360} 85% 70%)` : node.color;
+    const handle = texture(color, simple ? 15 : node.links);
+    if (handle)
+      renderer.draw(
+        handle,
+        0,
+        0,
+        0,
+        TILE,
+        TILE,
+        x * state.dpr,
+        y * state.dpr,
+        size * state.dpr,
+        size * state.dpr,
+      );
+  }
 }

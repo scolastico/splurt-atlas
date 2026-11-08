@@ -348,6 +348,118 @@ input[type='checkbox'] {
   padding: 10px 0;
   cursor: pointer;
 }
+.network-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.reset-infrastructure {
+  border: 1px solid #33414b;
+  border-radius: 4px;
+  padding: 4px 7px;
+  background: #1b2935;
+  color: #d9e6ee;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.reset-infrastructure:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-info {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #8499a9;
+  border-radius: 50%;
+  background: transparent;
+  color: #b5c8d6;
+  font:
+    600 0.75rem Georgia,
+    serif;
+  cursor: help;
+}
+.section-info:hover,
+.section-info:focus-visible {
+  color: #f0d49c;
+  border-color: currentColor;
+}
+.info-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: min(23rem, calc(100vw - 24px));
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid #526472;
+  border-radius: 6px;
+  background: #14212d;
+  color: #dce7ed;
+  box-shadow: 0 8px 32px #0008;
+}
+.info-popover .helper-text {
+  padding: 0;
+  margin: 0;
+  color: #b5c8d6;
+}
+.info-popover p + p {
+  margin-top: 12px;
+}
+.reset-app {
+  margin-top: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #885a5a;
+  border-radius: 4px;
+  background: transparent;
+  color: #e9b4ad;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+#map-statistics p {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.network-row .toggle-row {
+  flex: 1;
+  min-width: 0;
+}
+.network-drag-handle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: #8096a8;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+.network-drag-handle:hover,
+.network-drag-handle:focus-visible {
+  color: #f0d49c;
+  background: #253440;
+}
+.network-row.is-dragging {
+  background: #253440;
+  outline: 1px solid #e5bd69;
+  border-radius: 4px;
+}
+.network-row.is-dragging .network-drag-handle {
+  cursor: grabbing;
+  color: #f0d49c;
+}
 .toggle-row > span {
   display: flex;
   align-items: center;

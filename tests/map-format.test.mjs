@@ -181,7 +181,8 @@ test('strip slots follow the canonical channel order and skip absent channels', 
   assert.equal(slotIndex(mask, 'unknown'), -1);
   assert.equal(slotIndex(channelMask(CHANNELS), 'natural'), CHANNELS.indexOf('natural'));
   assert.equal(slotIndex(channelMask(CHANNELS), 'helpers'), 12);
-  assert.equal(slotIndex(channelMask(CHANNELS), 'navigation-surface'), CHANNELS.length - 1);
+  assert.equal(slotIndex(channelMask(CHANNELS), 'navigation-surface'), 14);
+  assert.equal(slotIndex(channelMask(CHANNELS), 'pipes-equipment'), CHANNELS.length - 1);
   assert.throws(() => channelMask(['sky']), /Unknown channel/);
   assert.equal(stripName(3, 4), 'c-3-4.webp');
   assert.equal(stripName(3, 4, 2), 'l2-3-4.webp');

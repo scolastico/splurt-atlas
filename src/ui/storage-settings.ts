@@ -3,6 +3,7 @@ import { assetCache, getDataBase } from '../data/source.ts';
 import { $ } from '../core/dom.ts';
 import { state } from '../core/state.ts';
 import type { ManifestMap } from '../core/types.ts';
+import { clearAtlasPreferences } from '../model/local-data.ts';
 
 function megabytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`;
@@ -77,5 +78,28 @@ export function initStorageSettings(): void {
   select.onchange = () => {
     assetCache.setMode(select.value);
     void warmStorage();
+  };
+  const reset = $<HTMLButtonElement>('reset-app');
+  reset.onclick = async () => {
+    if (
+      !confirm(
+        'Delete all downloaded maps and saved atlas settings on this device, then reload? This cannot be undone.',
+      )
+    )
+      return;
+    reset.disabled = select.disabled = true;
+    reset.textContent = 'Deleting local data…';
+    $('reset-app-status').hidden = true;
+    try {
+      await assetCache.deleteAll();
+      clearAtlasPreferences(localStorage);
+      clearAtlasPreferences(sessionStorage);
+      location.replace(location.pathname + location.search);
+    } catch (error) {
+      $('reset-app-status').textContent = `Reset failed: ${(error as Error).message}`;
+      $('reset-app-status').hidden = false;
+      reset.disabled = select.disabled = false;
+      reset.textContent = 'Reset app & delete local data';
+    }
   };
 }

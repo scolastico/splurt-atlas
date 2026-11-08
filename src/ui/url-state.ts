@@ -3,8 +3,14 @@
 import { $, checkbox } from '../core/dom.ts';
 import { invalidateUtilityPaths } from '../rendering/infrastructure-overlay.ts';
 import { updateSpaceAnimation } from '../rendering/space-background.ts';
-import { enabledNetworks, palette, state } from '../core/state.ts';
 import type { Network } from '../core/types.ts';
+import { updateNetworkSummary, restoreInfrastructureOrder } from './infrastructure-controls.ts';
+import { infrastructureOrder, enabledNetworks, palette, state } from '../core/state.ts';
+import {
+  DEFAULT_INFRASTRUCTURE_ORDER,
+  infrastructureOrderParam,
+  normalizeInfrastructureOrder,
+} from '../model/infrastructure-order.ts';
 import {
   decodeOptions,
   encodeOptions,
@@ -16,6 +22,13 @@ import {
 /** Updates to the fragment are coalesced so dragging does not rewrite history every frame. */
 const SHARE_DELAY_MS = 150;
 let shareTimer: ReturnType<typeof setTimeout> | undefined;
+
+function optionsFragment(): string {
+  const params = new URLSearchParams({ o: String(currentOptionMask()) });
+  const order = infrastructureOrderParam(infrastructureOrder);
+  if (order) params.set('u', order);
+  return `#${params}`;
+}
 
 export function currentOptionMask(): number {
   const options = {} as Record<OptionKey, boolean>;
@@ -29,10 +42,10 @@ export function share(immediate = false): void {
   const apply = () => {
     state.optionMask = currentOptionMask();
     if (!state.map) {
-      history.replaceState(null, '', `#o=${state.optionMask}`);
+      history.replaceState(null, '', optionsFragment());
       return;
     }
-    history.replaceState(null, '', viewFragment({ ...state, map: state.map }));
+    history.replaceState(null, '', viewFragment({ ...state, map: state.map, infrastructureOrder }));
   };
   if (immediate) apply();
   else shareTimer = setTimeout(apply, SHARE_DELAY_MS);
@@ -40,6 +53,8 @@ export function share(immediate = false): void {
 
 /** Applies the `o=` option bits of a link to the sidebar toggles. */
 export function restoreOptions(params: URLSearchParams): boolean {
+  if (params.has('u')) restoreInfrastructureOrder(normalizeInfrastructureOrder(params.get('u')!.split(',')));
+  else if (params.has('m') || params.has('o')) restoreInfrastructureOrder(DEFAULT_INFRASTRUCTURE_ORDER);
   const raw = params.get('o');
   if (raw === null) return false;
   const options = decodeOptions(raw);
@@ -54,6 +69,7 @@ export function restoreOptions(params: URLSearchParams): boolean {
   state.motion = options.motion;
   updateSpaceAnimation();
   invalidateUtilityPaths();
+  updateNetworkSummary();
   return true;
 }
 
@@ -63,7 +79,8 @@ export function currentHashParams(): URLSearchParams {
 
 /** Replaces the fragment with the options alone, as shown on the station picker. */
 export function shareOptionsOnly(): void {
-  const fragment = currentHashParams().has('o') ? `#o=${currentOptionMask()}` : '';
+  const fragment =
+    currentHashParams().has('o') || infrastructureOrderParam(infrastructureOrder) ? optionsFragment() : '';
   history.replaceState(null, '', location.pathname + location.search + fragment);
 }
 

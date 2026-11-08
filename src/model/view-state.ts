@@ -1,6 +1,7 @@
 // Pure helpers for the camera and the shareable URL fragment. They have no DOM
 // access so the unit tests can exercise them directly.
 import type { MapMeta } from '../core/types.ts';
+import { infrastructureOrderParam, type Infrastructure } from './infrastructure-order.ts';
 
 /** Zoom-level selector: 'overview' or the pyramid level to draw (0 = full chunks). */
 export type Detail = 'overview' | 0 | 1 | 2;
@@ -90,6 +91,7 @@ export interface ShareableView {
   optionMask?: number;
   doorRoles?: string[];
   offsetHighlights?: Set<number>;
+  infrastructureOrder?: readonly Infrastructure[];
 }
 
 /** Builds the `#m=…` fragment that restores a view. */
@@ -108,6 +110,10 @@ export function viewFragment(view: ShareableView): string {
     params.set('f', String((view.finding || 0) + 1));
   }
   if (view.optionMask !== undefined) params.set('o', String(view.optionMask));
+  if (view.infrastructureOrder) {
+    const order = infrastructureOrderParam(view.infrastructureOrder);
+    if (order) params.set('u', order);
+  }
   if (view.doorRoles?.length) params.set('j', view.doorRoles.join(','));
   if (view.offsetHighlights?.size)
     params.set('h', [...view.offsetHighlights].sort((a, b) => a - b).join(','));

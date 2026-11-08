@@ -20,10 +20,11 @@ export const CHANNELS = [
   'helpers',
   'navigation',
   'navigation-surface',
+  'pipes-equipment',
 ];
 export const UTILITIES = ['disposal', 'pipes', 'power', 'fluid', 'transit', 'navigation'];
 // Overview strips: terrain channels in overview.webp, everything else in overview-utilities.webp.
-export const OVERVIEW_TERRAIN = ['base', 'foreground', 'natural'];
+export const OVERVIEW_TERRAIN = ['base', 'foreground', 'natural', 'pipes-equipment'];
 // Coarser levels of detail: level L packs 2^L × 2^L chunks into one strip.
 export const LODS = [1, 2];
 

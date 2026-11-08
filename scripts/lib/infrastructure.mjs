@@ -64,7 +64,11 @@ export function buildInfrastructure(cells, at, db, levels) {
   for (const cell of cells) {
     for (const [atomIndex, atom] of cell.appearance.entries()) {
       const channel = classify(atom.path);
-      if (!['power', 'pipes', 'fluid'].includes(channel)) continue;
+      if (
+        !['power', 'pipes', 'fluid'].includes(channel) ||
+        /^\/obj\/machinery\/meter(?:\/|$)/.test(atom.path)
+      )
+        continue;
       const v = vars(atom),
         literal = (value) => (db.literal ? db.literal(value) : value);
       const layer =
@@ -300,9 +304,15 @@ export function buildInfrastructure(cells, at, db, levels) {
       }
     } else if (n.channel === 'pipes' && n.path.includes('/components/')) {
       const icon = 'icons/obj/pipes_n_cables/pipe_underlays.dmi';
-      for (const { direction, node } of n.connections) {
-        if (!node.exposed) continue;
-        const state = `intact_${direction}_${n.layer}`;
+      const v = vars(n.atom);
+      const shiftWhole = ['FALSE', '0'].includes(
+        String(db.literal ? db.literal(v.shift_underlay_only) : v.shift_underlay_only),
+      );
+      const underlayLayer = shiftWhole ? 3 : n.layer;
+      for (const [direction] of cardinals) {
+        if (!(n.ports & direction)) continue;
+        const node = n.connections.find((entry) => entry.direction === direction)?.node;
+        const state = `${node ? 'intact' : 'exposed'}_${direction}_${underlayLayer}`;
         if (!db.hasIconState(icon, state)) continue;
         n.cell.appearance.push({
           ...n.atom,
@@ -311,7 +321,7 @@ export function buildInfrastructure(cells, at, db, levels) {
             icon: `'${icon}'`,
             icon_state: JSON.stringify(state),
             dir: '2',
-            color: JSON.stringify(node.color),
+            color: JSON.stringify(node?.color || n.color),
             layer: '2.475',
           },
         });

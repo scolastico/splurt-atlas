@@ -3,6 +3,7 @@
 // schedules the next paint after a change.
 import type { LevelData, Manifest, MapMeta, Network } from './types.ts';
 import type { TileRef } from '../model/view-state.ts';
+import { DEFAULT_INFRASTRUCTURE_ORDER } from '../model/infrastructure-order.ts';
 
 /** A decoded deck plus a lookup of strip masks per zoom level, keyed "x,y". */
 export interface DeckLevel extends LevelData {
@@ -104,6 +105,8 @@ export const networkNames: Record<Network, string> = {
 
 /** Utility networks whose hidden components are currently shown. */
 export const enabledNetworks = new Set<Network>(['transit']);
+/** Sidebar order, topmost infrastructure first. Stored locally by the controls. */
+export const infrastructureOrder = [...DEFAULT_INFRASTRUCTURE_ORDER];
 
 /** The definition under a tile, if the deck is loaded and the tile is inside the map. */
 export function definitionAt(x: number, y: number, z: number) {

@@ -27,6 +27,7 @@ import type { LevelData, MapMeta } from '../core/types.ts';
 import { currentHashParams, restoreOptions, share, shareOptionsOnly } from './url-state.ts';
 import { selectedTile } from '../model/view-state.ts';
 import { decodeLevel, decodeMap } from '../../scripts/lib/map-format.mjs';
+import { updateNetworkSummary } from './infrastructure-controls.ts';
 
 let loadAbort: AbortController | null = null;
 
@@ -63,9 +64,7 @@ function describeStation(map: MapMeta): void {
     `${decks} ${decks === 1 ? 'deck' : 'decks'} · ${map.areas.length} mapped areas · pre-round snapshot`;
   $('station-meta').textContent =
     `${map.width} × ${map.height} GRID / ${decks} Z-LEVEL${decks === 1 ? '' : 'S'}`;
-  $('network-summary').textContent = map.infrastructure
-    ? `${map.infrastructure.powerNetworks} separate mapped power networks. Colors describe wired connectivity before a round starts.`
-    : '';
+  updateNetworkSummary();
 }
 
 /** Applies the camera and selection a link describes, after the station is fitted. */
