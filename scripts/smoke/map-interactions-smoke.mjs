@@ -28,15 +28,16 @@ try {
         import {inspect,inspectArea} from '/src/ui/inspector.ts';
         import {initMapContextMenu} from '/src/ui/map-context-menu.ts';
         import {selectedArea} from '/src/model/view-state.ts';
+        import {paintMapStatistics} from '/src/ui/map-statistics.ts';
         import {tileCenterX,tileCenterY,worldToScreenX,worldToScreenY} from '/src/rendering/projection.ts';
         const definition = {area:0,turf:'/turf/open/floor',aperture:0,atoms:[{name:'Fixture chair',path:'/obj/structure/chair',description:'A chair.',vars:{},network:null,source:null}]};
-        state.manifest = {repository:'https://example.test/upstream',commit:'fixture-commit'};
+        state.manifest = {repository:'https://example.test/upstream',commit:'fixture-commit',chunkTiles:16};
         state.map = {id:'fixture',name:'Fixture Station',width:10,height:10,levels:[1],areas:[{name:'Fixture Room',path:'/area/fixture',region:'Test'}],definitions:[definition],files:['_maps/fixture.dmm'],infrastructure:{nodes:[],transitions:[]}};
         state.levels.set(1,{grid:new Uint32Array(100)});
         state.w=1200;state.h=900;state.x=160;state.y=160;state.zoom=1;state.ready=true;
         document.querySelector('#loading').hidden=true;
         Object.defineProperty(navigator,'clipboard',{value:{writeText:async value=>{window.copied=value;}}});
-        initNetworkControls();initLayout(()=>{});initCameraControls();initHistory();initMapContextMenu();recordJump();
+        initNetworkControls();initLayout(()=>{});initCameraControls();initHistory();initMapContextMenu();paintMapStatistics();recordJump();
         window.fixture={state,inspect,inspectArea,resetHistory,recordJump,selectedArea};
         window.screenFor=(x,y)=>({x:worldToScreenX(tileCenterX(x)),y:worldToScreenY(tileCenterY(y))});
         window.fixtureReady=true;
@@ -63,6 +64,18 @@ try {
   });
   await page.goto('http://atlas.test/');
   await page.waitForFunction(() => window.fixtureReady);
+  assert.equal(await page.locator('#map-statistics-list > div').count(), 17);
+  assert.equal(
+    await page
+      .locator('#map-statistics')
+      .textContent()
+      .then((text) => text.includes('pre-round snapshot')),
+    false,
+  );
+  const statisticFonts = await page
+    .locator('#map-statistics-list dt, #map-statistics-list dd')
+    .evaluateAll((nodes) => [...new Set(nodes.map((node) => getComputedStyle(node).fontSize))]);
+  assert.equal(statisticFonts.length, 1, 'every statistic uses the same font size');
   const point = (x, y) => page.evaluate(([x, y]) => window.screenFor(x, y), [x, y]);
   const open = async (x, y) => {
     const p = await point(x, y);
@@ -186,6 +199,65 @@ try {
   assert.deepEqual(result.afterForward, { x: 2, y: 2, z: 1 });
   assert.deepEqual(result.forward, [true, true, true]);
   assert.deepEqual(result.boundaryForward, [false, false, false]);
+  const roomText = await page.evaluate(async () => {
+    const { drawAnnotations } = await import('/src/rendering/annotations.ts');
+    const { state } = window.fixture;
+    state.regions = true;
+    state.selected = null;
+    state.selectedArea = null;
+    state.x = 160;
+    state.y = 160;
+    const calls = [];
+    const context = {
+      setTransform(a) {
+        this.scale = a;
+      },
+      fill() {},
+      stroke() {},
+      save() {},
+      restore() {},
+      fillRect() {},
+      strokeRect() {},
+      strokeText() {},
+      fillText(text, x, y) {
+        calls.push({
+          text,
+          x,
+          y,
+          screenFont: parseFloat(this.font) * this.scale,
+          align: this.textAlign,
+          baseline: this.textBaseline,
+        });
+      },
+    };
+    for (const zoom of [1, 3]) {
+      state.zoom = zoom;
+      drawAnnotations(context);
+    }
+    return calls;
+  });
+  assert.equal(roomText.length, 2);
+  assert.deepEqual(
+    roomText.map((label) => [label.x, label.y]),
+    [
+      [160, 160],
+      [160, 160],
+    ],
+  );
+  assert.equal(roomText[1].screenFont, roomText[0].screenFont * 3);
+  assert.ok(roomText.every((label) => label.align === 'center' && label.baseline === 'middle'));
+  const bounded = await page.evaluate(async () => {
+    const { panBy, zoomBy } = await import('/src/ui/camera.ts');
+    const { state } = window.fixture;
+    state.zoom = 1;
+    panBy(1e9, -1e9);
+    const edge = { x: state.x, y: state.y };
+    zoomBy(0.0001);
+    return { edge, x: state.x, y: state.y, zoom: state.zoom };
+  });
+  assert.deepEqual(bounded.edge, { x: 384, y: -64 });
+  assert.equal(bounded.zoom, 0.04);
+  assert.ok(bounded.x <= 320 + 64 / 0.04 && bounded.y >= -64 / 0.04);
   assert.deepEqual(errors, []);
   console.log(
     'Passed context clipboard actions, centered tile URLs, area selection/sharing/debug JSON, cancellation and mouse history boundaries.',

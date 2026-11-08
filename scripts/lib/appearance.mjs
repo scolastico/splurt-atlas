@@ -2,6 +2,7 @@
 // resolved statically. Arbitrary Initialize()/update_appearance() code cannot.
 import { transitOverlays } from './transit-appearance.mjs';
 import { unquote } from './dm.mjs';
+import { safeAppearances } from './safe-appearance.mjs';
 
 /** Solar machinery creates raised panel/dish vis_contents during initialization. */
 export function solarOverlays(atom, db) {
@@ -94,7 +95,7 @@ export function randomiseTrash(atoms, x, y, z, db) {
 }
 export function expandStructures(atoms, db, depth = 0) {
   if (depth > 8) return atoms;
-  return atoms.flatMap((atom) => {
+  return safeAppearances(atoms, db).flatMap((atom) => {
     const vars = { ...db.resolve(atom.path), ...atom.vars };
     if (atom.path.includes('/atmospherics/components/')) {
       const state = unquote(vars.icon_state);

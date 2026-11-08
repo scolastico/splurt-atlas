@@ -28,6 +28,7 @@ import { currentHashParams, restoreOptions, share, shareOptionsOnly } from './ur
 import { selectedTile, selectedArea, selectionCamera } from '../model/view-state.ts';
 import { decodeLevel, decodeMap } from '../../scripts/lib/map-format.mjs';
 import { updateNetworkSummary } from './infrastructure-controls.ts';
+import { paintMapStatistics } from './map-statistics.ts';
 
 let loadAbort: AbortController | null = null;
 
@@ -58,12 +59,8 @@ function renderDeckButtons(map: MapMeta): void {
 }
 
 function describeStation(map: MapMeta): void {
-  const decks = map.levels.length;
   $('map-title').textContent = map.name;
-  $('map-subtitle').textContent =
-    `${decks} ${decks === 1 ? 'deck' : 'decks'} · ${map.areas.length} mapped areas · pre-round snapshot`;
-  $('station-meta').textContent =
-    `${map.width} × ${map.height} GRID / ${decks} Z-LEVEL${decks === 1 ? '' : 'S'}`;
+  paintMapStatistics();
   updateNetworkSummary();
 }
 
@@ -214,8 +211,7 @@ export function showMapPicker(): void {
   $('map-picker').hidden = false;
   $<HTMLSelectElement>('station').value = '';
   $('map-title').textContent = 'Choose a station';
-  $('map-subtitle').textContent = `${manifest.maps.length} map configurations available`;
-  $('station-meta').textContent = '';
+  paintMapStatistics();
   document.querySelector<HTMLElement>('.floating-decks')!.hidden = true;
   document.querySelector<HTMLElement>('.map-tools')!.hidden = true;
   shareOptionsOnly();

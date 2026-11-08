@@ -16,9 +16,11 @@ export function utilityExposed(atom, atoms, db) {
       : /\/(plating|space|openspace|glass|catwalk)(?:\/|$)/.test(turf?.path || '');
   if (channel === 'pipes') {
     // Generated connector images inherit the component's type, but not its
-    // permanently exposed machinery body. Their visibility follows the turf.
-    if (String(atom.vars?.icon || '').includes('pipe_underlays')) return uncovered;
+    // permanently exposed machinery body. Respect the component's hide setting
+    // so above-floor fittings stay exposed and vent caps follow the turf.
     const hide = literal(vars.hide);
+    if (String(atom.vars?.icon || '').includes('pipe_underlays'))
+      return ['FALSE', '0'].includes(hide) || uncovered;
     return ['FALSE', '0'].includes(hide) || (!hide && atom.path.includes('/components/')) || uncovered;
   }
   if (channel === 'disposal' && !/^\/obj\/structure\/disposal(pipe|construct)(?:\/|$)/.test(atom.path))
@@ -48,7 +50,6 @@ export function underCatwalk(atom, atoms, db) {
   if (channel === 'disposal' && !/^\/obj\/structure\/disposal(pipe|construct)(?:\/|$)/.test(atom.path))
     return false;
   const vars = { ...db.resolve(atom.path), ...atom.vars };
-  if (channel === 'pipes' && String(atom.vars?.icon || '').includes('pipe_underlays')) return true;
   if (channel === 'pipes' && ['FALSE', '0'].includes(String(db.literal ? db.literal(vars.hide) : vars.hide)))
     return false;
   return true;
@@ -59,6 +60,15 @@ const NAVBEACON = /^\/obj\/machinery\/navbeacon(?:\/|$)/;
 /** Nav beacons are real undertile devices, not disposable mapping helpers. */
 export function beaconVisibility(atom, atoms, db) {
   if (!NAVBEACON.test(atom.path)) return null;
+  return undertileVisibility(atoms, db);
+}
+
+export function floorSafeVisibility(atom, atoms, db) {
+  if (!/^\/obj\/structure\/safe\/floor(?:\/|$)/.test(atom.path)) return null;
+  return undertileVisibility(atoms, db);
+}
+
+function undertileVisibility(atoms, db) {
   const turf = atoms.find((item) => item.path.startsWith('/turf/'));
   const vars = turf ? { ...db.resolve(turf.path), ...turf.vars } : {};
   const raw = vars.underfloor_accessibility;
@@ -76,6 +86,7 @@ export function beaconVisibility(atom, atoms, db) {
 export function bakedChannel(atom, atoms, db) {
   if (atom.vars?.atlas_random_marker === '1') return 'random-markers';
   if (atom.vars?.atlas_random_preview === '1') return 'foreground';
+  if (floorSafeVisibility(atom, atoms, db) === 'underfloor') return 'base';
   // Mapping helpers only guide mappers (mail sorting, access, lighting...); they never exist in a round.
   if (MAPPING_HELPER.test(atom.path)) return 'helpers';
   if (/^\/obj\/machinery\/meter(?:\/|$)/.test(atom.path)) return 'pipes-equipment';

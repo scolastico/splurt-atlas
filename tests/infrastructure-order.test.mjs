@@ -85,7 +85,7 @@ test('infrastructure order survives URL round trips and resetting omits the cust
 });
 
 test('map statistics retain just the mapped power-network count', () => {
-  assert.equal(networkSummary(12), '12 separate mapped power networks.');
+  assert.equal(networkSummary(12), '12');
 });
 
 test('simple utility symbols keep the five native pipe offsets without shifting cable layers', () => {
@@ -133,8 +133,8 @@ test('vents use runtime bodies and retain concealed connectors for the Atmospher
   assert.equal(bakedChannel(body, atoms, db), 'pipes-floor-equipment');
   assert.ok(cap);
   assert.equal(bakedChannel(cap, atoms, db), 'pipes');
-  // Even always-visible pumps must not force their connector above intact flooring.
-  assert.equal(bakedChannel({ ...cap, vars: { ...cap.vars, hide: 'FALSE' } }, atoms, db), 'pipes');
+  // Above-floor machinery retains its fittings even on intact flooring.
+  assert.equal(bakedChannel({ ...cap, vars: { ...cap.vars, hide: 'FALSE' } }, atoms, db), 'pipes-surface');
   const catwalk = { path: '/turf/open/floor/catwalk_floor', vars: { underfloor_accessibility: '1' } };
   assert.equal(underCatwalk(cap, [catwalk, cap], db), true);
   const scrubber = expandStructures(

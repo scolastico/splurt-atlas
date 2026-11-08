@@ -64,7 +64,8 @@ try {
     await page.locator('.station-controls #station-meta, .station-controls #map-subtitle').count(),
     0,
   );
-  assert.equal(await page.locator('#map-statistics #station-meta, #map-statistics #map-subtitle').count(), 2);
+  assert.equal(await page.locator('#station-meta, #map-subtitle').count(), 0);
+  assert.equal(await page.locator('#map-statistics-list dt').first().textContent(), 'Power networks');
   assert.equal(
     await page.locator('#source-link').evaluate((node) => node.nextElementSibling?.id),
     'commit-link',
@@ -105,10 +106,7 @@ try {
   assert.equal(await page.locator('#transit').isVisible(), true);
   assert.equal(await page.locator('#reset-infrastructure-order').isDisabled(), true);
   assert.equal(await page.locator('#reset-infrastructure-order').isHidden(), true);
-  assert.equal(
-    await page.locator('#map-statistics #network-summary').textContent(),
-    '12 separate mapped power networks.',
-  );
+  assert.equal(await page.locator('#map-statistics #network-summary').textContent(), '12');
   await page.locator('[popovertarget="infrastructure-info"]').hover();
   assert.equal(await page.locator('#infrastructure-info').isVisible(), true);
   assert.equal(await page.locator('#power-network-color-hint').isVisible(), false);

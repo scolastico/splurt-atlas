@@ -11,6 +11,7 @@ import { isSidebarAnimating } from '../ui/layout.ts';
 import { resizeBackground, updateSpaceAnimation } from './space-background.ts';
 import { state, TILE } from '../core/state.ts';
 import { detailForZoom } from '../model/view-state.ts';
+import { constrainCamera } from './projection.ts';
 
 /** Shade of a deck `depth` levels below the viewed one. */
 function deckShade(depth: number): number {
@@ -48,6 +49,7 @@ function render(): void {
 }
 
 function paintFrame(): void {
+  constrainCamera();
   if (isSidebarAnimating()) redraw();
   const detail = String(detailForZoom(state.zoom));
   if (mapCanvas.dataset.detail !== detail) mapCanvas.dataset.detail = detail;

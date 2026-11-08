@@ -3,7 +3,7 @@
 import sharp from 'sharp';
 import { aperture, unquote } from './dm.mjs';
 import { objectOffsets } from './object-offsets.mjs';
-import { bakedChannel, underCatwalk, beaconVisibility } from './utility-visibility.mjs';
+import { bakedChannel, underCatwalk, beaconVisibility, floorSafeVisibility } from './utility-visibility.mjs';
 
 const numeric = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 
@@ -87,11 +87,14 @@ export function createTileRenderer({ db, sprites, tilePixels }) {
               (atom) =>
                 !atom.vars?.atlas_random_marker &&
                 !atom.vars?.atlas_random_preview &&
-                (underCatwalk(atom, atoms, db) || beaconVisibility(atom, atoms, db) === 'underfloor'),
+                (underCatwalk(atom, atoms, db) ||
+                  beaconVisibility(atom, atoms, db) === 'underfloor' ||
+                  floorSafeVisibility(atom, atoms, db) === 'underfloor'),
             )
           : [];
       const selected = atoms.filter(
         (atom) =>
+          floorSafeVisibility(atom, atoms, db) !== 'hidden' &&
           ((channel === 'foreground-mapper'
             ? bakedChannel(atom, atoms, db) === 'foreground' && atom.vars?.atlas_random_preview !== '1'
             : bakedChannel(atom, atoms, db) === channel) ||

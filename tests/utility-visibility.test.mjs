@@ -63,3 +63,26 @@ test('atmospherics components stay visible under intact floors while their pipe 
   };
   assert.equal(bakedChannel(cap, [closed, cap], db), 'pipes');
 });
+
+test('above-floor filter fittings remain exposed, while covered vent fittings still require the toggle', () => {
+  const filter = '/obj/machinery/atmospherics/components/trinary/filter/atmos/o2';
+  const vent = '/obj/machinery/atmospherics/components/unary/vent_pump/on/layer4';
+  const db = {
+    resolve: (path) =>
+      path.startsWith('/turf/')
+        ? { underfloor_accessibility: path.includes('catwalk') ? '1' : '0' }
+        : { hide: path === vent ? 'TRUE' : 'FALSE' },
+    literal: (value) => value,
+  };
+  for (const turf of ['/turf/open/floor/iron', '/turf/open/floor/catwalk_floor']) {
+    const floor = { path: turf, vars: {} };
+    const cap = (path) => ({
+      path,
+      vars: { icon: "'icons/obj/pipes_n_cables/pipe_underlays.dmi'", icon_state: '"intact_4_3"' },
+    });
+    const exposed = cap(filter),
+      covered = cap(vent);
+    assert.equal(bakedChannel(exposed, [floor, exposed], db), 'pipes-surface');
+    assert.equal(bakedChannel(covered, [floor, covered], db), 'pipes');
+  }
+});

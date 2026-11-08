@@ -21,7 +21,7 @@ export function normalizeInfrastructureOrder(value: unknown): Infrastructure[] {
 }
 
 export function networkSummary(count: number): string {
-  return `${count} separate mapped power networks.`;
+  return count.toLocaleString('en-US');
 }
 
 /** Only custom orders need a URL field; absent fields represent game order. */

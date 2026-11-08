@@ -2,6 +2,7 @@
 // names, and the selected tile.
 import { applyWorldTransform, visibleTileRange } from './projection.ts';
 import { reducedMotion, state, TILE } from '../core/state.ts';
+import { isRegionTurf, roomLabels, type RoomLabel } from '../model/room-labels.ts';
 
 interface AreaPaths {
   fill: Path2D;
@@ -11,6 +12,7 @@ interface AreaPaths {
 /** Fill and boundary paths per area, cached per chunk ("z:cx,cy"). */
 const regionChunks = new Map<string, Map<number, AreaPaths>>();
 const areaColors = new Map<number, string>();
+const regionLabels = new Map<number, RoomLabel[]>();
 
 /** The selection pulse lasts this long after a tile is selected. */
 const SELECTION_PULSE_MS = 1400;
@@ -18,6 +20,7 @@ const SELECTION_PULSE_MS = 1400;
 export function resetAnnotationCaches(): void {
   regionChunks.clear();
   areaColors.clear();
+  regionLabels.clear();
 }
 
 function hashColor(text: string): string {
@@ -49,7 +52,7 @@ function regionChunk(z: number, cx: number, cy: number): Map<number, AreaPaths> 
   for (let y = cy * chunkTiles; y < Math.min(map.height, (cy + 1) * chunkTiles); y++)
     for (let x = cx * chunkTiles; x < Math.min(map.width, (cx + 1) * chunkTiles); x++) {
       const definition = definitionAtCell(x, y);
-      if (!definition || definition.turf.includes('/space')) continue;
+      if (!definition || !isRegionTurf(definition.turf)) continue;
       let paths = byArea.get(definition.area);
       if (!paths) byArea.set(definition.area, (paths = { fill: new Path2D(), edge: new Path2D() }));
       paths.fill.rect(x * TILE, y * TILE, TILE, TILE);
@@ -86,23 +89,22 @@ function drawRegions(context: CanvasRenderingContext2D): void {
       }
   context.globalAlpha = 1;
   if (state.zoom <= 0.55) return;
-  // One label per visible area, at the first of its tiles in reading order.
-  const labels = new Map<number, [number, number]>();
-  for (let y = top; y < bottom; y++)
-    for (let x = left; x < right; x++) {
-      const definition = map.definitions[data.grid[y * map.width + x]];
-      if (definition && !labels.has(definition.area) && !definition.turf.includes('/space'))
-        labels.set(definition.area, [x, y]);
-    }
-  for (const [area, [x, y]] of labels) {
-    context.font = `${10 / state.zoom}px 'IBM Plex Mono',monospace`;
+  let labels = regionLabels.get(state.z);
+  if (!labels) regionLabels.set(state.z, (labels = roomLabels(map, data)));
+  context.save();
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  for (const { area, x, y } of labels) {
+    if (x < left || x > right || y < top || y > bottom) continue;
+    context.font = `${Math.max(12, 8 / state.zoom)}px 'IBM Plex Mono',monospace`;
     context.fillStyle = '#eff4ee';
     context.strokeStyle = '#0c1824';
-    context.lineWidth = 3 / state.zoom;
+    context.lineWidth = Math.max(2, 2 / state.zoom);
     const label = map.areas[area].name;
-    context.strokeText(label, x * TILE + 8, y * TILE + 18);
-    context.fillText(label, x * TILE + 8, y * TILE + 18);
+    context.strokeText(label, x * TILE, y * TILE);
+    context.fillText(label, x * TILE, y * TILE);
   }
+  context.restore();
 }
 
 /** Whether the selection pulse is still running and needs more frames. */

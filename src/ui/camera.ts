@@ -12,7 +12,7 @@ import {
   showSidebarView,
   sidebarInset,
 } from './layout.ts';
-import { screenCenterX, screenCenterY, tileAtScreen } from '../rendering/projection.ts';
+import { constrainCamera, screenCenterX, screenCenterY, tileAtScreen } from '../rendering/projection.ts';
 import { state, TILE } from '../core/state.ts';
 import { share } from './url-state.ts';
 
@@ -47,6 +47,7 @@ export function zoomBy(factor: number, screenX = screenCenterX(), screenY = scre
   state.x += (screenX - screenCenterX()) * (1 / before - 1 / after);
   state.y += (screenY - screenCenterY()) * (1 / before - 1 / after);
   state.zoom = after;
+  constrainCamera();
   redraw();
   share();
 }
@@ -54,6 +55,7 @@ export function zoomBy(factor: number, screenX = screenCenterX(), screenY = scre
 export function panBy(worldX: number, worldY: number): void {
   state.x += worldX;
   state.y += worldY;
+  constrainCamera();
   redraw();
   share();
 }

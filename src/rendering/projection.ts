@@ -4,6 +4,22 @@
 import { bottomSidebarInset, sidebarInset } from '../ui/layout.ts';
 import { TILE, state } from '../core/state.ts';
 import { deckScale } from '../model/view-state.ts';
+import { boundedCamera } from '../model/camera-bounds.ts';
+
+export function constrainCamera(): void {
+  if (!state.map) return;
+  const point = boundedCamera(
+    state.x,
+    state.y,
+    state.zoom,
+    state.map.width,
+    state.map.height,
+    state.w - sidebarInset(),
+    state.h - bottomSidebarInset(),
+  );
+  state.x = point.x;
+  state.y = point.y;
+}
 
 /** Screen position of the camera center, which avoids the area under the sidebar. */
 export function screenCenterX(): number {

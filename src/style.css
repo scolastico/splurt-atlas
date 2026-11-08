@@ -149,20 +149,6 @@ select {
   font-weight: 500;
   font-size: 1rem;
 }
-#map-subtitle {
-  font:
-    0.75rem 'IBM Plex Mono',
-    monospace;
-  color: #90a7b5;
-  line-height: 1.7;
-  margin: 10px 0 5px;
-}
-#station-meta {
-  font:
-    0.75rem 'IBM Plex Mono',
-    monospace;
-  color: var(--muted);
-}
 .navigation-row {
   display: flex;
   align-items: center;
@@ -412,9 +398,25 @@ input[type='checkbox'] {
   font-size: 0.8125rem;
   cursor: pointer;
 }
-#map-statistics p {
-  color: var(--muted);
+#map-statistics-list {
+  margin: 0;
   font-size: 0.8125rem;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+#map-statistics-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+#map-statistics-list dt {
+  color: var(--muted);
+}
+#map-statistics-list dd {
+  margin: 0;
+  text-align: right;
 }
 .network-row .toggle-row {
   flex: 1;

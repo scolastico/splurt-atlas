@@ -8,6 +8,8 @@ const pools = new WeakMap();
 const literal = (db, value) => String(db.literal ? db.literal(String(value ?? '')) : (value ?? ''));
 const PLANT = /^\/obj\/item\/kirbyplants\/random(?:\/|$)/;
 const GIBSPAWNER = /^\/obj\/effect\/gibspawner(?:\/|$)/;
+const FORGERY = /^\/obj\/item\/fakeartefact(?:\/|$)/;
+const BOOKCASE = /^\/obj\/structure\/bookcase(?:\/|$)/;
 
 /** Static gib declarations only; movement and the round's blood DNA are not simulated. */
 export function gibPreviews(atom, x, y, z, db) {
@@ -142,6 +144,12 @@ export function randomSourceInfo(atom, db) {
   if (!/^\/(obj|mob)\//.test(atom.path) || atom.path.startsWith('/obj/effect/mapping_helpers/')) return null;
   const vars = { ...db.resolve(atom.path), ...atom.vars };
   if (GIBSPAWNER.test(atom.path)) return { kind: 'gibs' };
+  if (FORGERY.test(atom.path)) return { kind: 'forgery' };
+  if (
+    BOOKCASE.test(atom.path) &&
+    (atom.path.includes('/random') || ['TRUE', '1'].includes(literal(db, vars.load_random_books)))
+  )
+    return { kind: 'bookcase' };
   if (PLANT.test(atom.path)) return { kind: 'plant' };
   if (/^\/obj\/structure\/trash_pile(?:\/|$)/.test(atom.path)) return { kind: 'trash' };
   if (/^\/obj\/structure\/sign\/poster(?:\/|$)/.test(atom.path) && vars.random_basetype?.startsWith('/'))
@@ -165,6 +173,38 @@ export function randomAppearances(atoms, originals, x, y, z, db) {
     const info = randomSourceInfo(atom, db);
     if (!info) return [atom];
     if (info.kind === 'gibs') return gibPreviews(atom, x, y, z, db);
+    if (info.kind === 'bookcase') {
+      const vars = { ...db.resolve(atom.path), ...atom.vars };
+      const loading = ['TRUE', '1'].includes(literal(db, vars.load_random_books));
+      const configured = Number(literal(db, vars.books_to_load || '0'));
+      const jitter =
+        atom.path.includes('/random') && configured ? [-1, -1, 0, 1, 1][seedFor(atom, x, y, z) % 5] : 0;
+      const count = loading && Number.isFinite(configured) ? Math.max(0, configured + jitter) : 0;
+      const state = `book-${Math.min(5, count)}`;
+      if (db.hasIconState && !db.hasIconState(unquote(vars.icon), state)) return [];
+      return [
+        { ...atom, vars: { ...atom.vars, icon_state: JSON.stringify(state), atlas_random_preview: '1' } },
+      ];
+    }
+    if (info.kind === 'forgery') {
+      const vars = { ...db.resolve(atom.path), ...atom.vars };
+      const pool = (vars.possible?.match(/\/obj\/item\/[\w/]+/g) || [])
+        .map((path) => db.resolve(path))
+        .filter(
+          (candidate) =>
+            candidate.icon &&
+            candidate.icon_state &&
+            (!db.hasIconState || db.hasIconState(unquote(candidate.icon), unquote(candidate.icon_state))),
+        );
+      if (!pool.length) return [];
+      const chosen = pool[seedFor(atom, x, y, z) % pool.length];
+      return [
+        {
+          ...atom,
+          vars: { ...atom.vars, icon: chosen.icon, icon_state: chosen.icon_state, atlas_random_preview: '1' },
+        },
+      ];
+    }
     if (info.kind === 'plant') {
       const icon = db.resolve('/obj/item/kirbyplants').icon;
       const states = plantPreviewStates(atom, db).filter(

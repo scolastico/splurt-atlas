@@ -15,6 +15,12 @@ export function randomPreviewMarkup(atoms: Atom[], markers: boolean): string {
         note =
           atom.description ||
           'A vending machine is guaranteed here, but the displayed model is only one possible outcome.';
+      else if (atom.random?.kind === 'forgery')
+        note =
+          'This forgery imitates a randomly chosen item. The preview is one possible disguise, not the real item it resembles.';
+      else if (atom.random?.kind === 'bookcase')
+        note =
+          'Shelf fullness is a representative preview. The actual book count and titles depend on the round and the live library database; no specific titles are inferred.';
       else if (atom.random?.kind === 'gibs')
         note =
           'The normal map view shows representative remains from this spawner. Their appearance and spread are randomized in game.';

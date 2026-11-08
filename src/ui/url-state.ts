@@ -3,6 +3,7 @@
 import { $, checkbox } from '../core/dom.ts';
 import { invalidateUtilityPaths } from '../rendering/infrastructure-overlay.ts';
 import { updateSpaceAnimation } from '../rendering/space-background.ts';
+import { constrainCamera } from '../rendering/projection.ts';
 import type { Network } from '../core/types.ts';
 import { updateNetworkSummary, restoreInfrastructureOrder } from './infrastructure-controls.ts';
 import { infrastructureOrder, enabledNetworks, palette, state } from '../core/state.ts';
@@ -40,6 +41,7 @@ export function currentOptionMask(): number {
 export function share(immediate = false): void {
   clearTimeout(shareTimer);
   const apply = () => {
+    constrainCamera();
     state.optionMask = currentOptionMask();
     if (!state.map) {
       history.replaceState(null, '', optionsFragment());
