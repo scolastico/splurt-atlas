@@ -92,11 +92,6 @@ export function telecommsSections(): HTMLElement[] {
     );
     row('Automatic link tags', machine.autolinkers.map(String).join(', ') || 'None');
     section.append(heading, list);
-    const note = document.createElement('p');
-    note.className = 'helper-text';
-    note.textContent =
-      'Mapped startup configuration. Links follow shared automatic link tags and the source range rules; network names alone do not create links. Power and live signal routing are not simulated.';
-    section.append(note);
     if (machine.unresolved.length) {
       const unresolved = document.createElement('p');
       unresolved.className = 'helper-text';

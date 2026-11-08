@@ -45,6 +45,67 @@ test('catalog fallback restores the last known manifest when the network is unav
   };
   assert.deepEqual(await cache.catalog('https://example.test/manifest.json'), manifest);
 });
+
+test('refreshing to a new catalog downloads changed maps, reuses unchanged maps and reports active progress', async () => {
+  preferences.clear();
+  preferences.set('atlas-storage-mode', 'all');
+  const { blob, manifest, base } = await zipFixture();
+  const scope = 'test-refresh-update';
+  let catalog = manifest;
+  const requests = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    return new Response(new URL(url).pathname.endsWith('manifest.json') ? JSON.stringify(catalog) : blob);
+  };
+  const original = new AssetCache(scope);
+  original.setManifest(await original.catalog(new URL('manifest.json', base)));
+  original.setCurrentMap('first');
+  await original.warm(manifest, base);
+  assert.equal(requests.filter((url) => new URL(url).pathname.endsWith('.zip')).length, 2);
+  catalog = {
+    ...manifest,
+    buildId: 'build-2',
+    maps: manifest.maps.map((map) => (map.id === 'first' ? { ...map, assetVersion: 'map-2' } : map)),
+  };
+  requests.length = 0;
+  const activity = [],
+    progress = [];
+  const refreshed = new AssetCache(
+    scope,
+    (message, info) => progress.push({ message, info }),
+    (active) => activity.push(active),
+  );
+  const latest = await refreshed.catalog(new URL('manifest.json', base));
+  assert.equal(latest.buildId, 'build-2');
+  refreshed.setManifest(latest);
+  refreshed.setCurrentMap('first');
+  await refreshed.warm(latest, base);
+  assert.deepEqual(
+    requests.filter((url) => new URL(url).pathname.endsWith('.zip')).map((url) => new URL(url).pathname),
+    ['/data/first.zip'],
+  );
+  assert.ok(activity.includes(true));
+  assert.ok(
+    requests.some(
+      (url) => new URL(url).pathname.endsWith('first.zip') && new URL(url).searchParams.get('v') === 'map-2',
+    ),
+  );
+  assert.equal(activity.at(-1), false);
+  assert.ok(progress.some((step) => step.info?.activity === 'download'));
+  assert.equal(progress.at(-1).info.overallPercent, 100);
+  assert.equal(await refreshed.read(`${scope}:map-1:first/map.json`), null);
+  assert.ok(await refreshed.read(`${scope}:map-2:first/map.json`));
+  assert.ok(await refreshed.read(`${scope}:map-1:second/map.json`));
+  requests.length = 0;
+  const again = new AssetCache(scope);
+  again.setManifest(await again.catalog(new URL('manifest.json', base)));
+  await again.warm(latest, base);
+  assert.equal(
+    requests.filter((url) => new URL(url).pathname.endsWith('.zip')).length,
+    0,
+    'a second refresh needs no downloads or reset',
+  );
+});
 async function zipFixture() {
   const zip = new JSZip();
   zip.file(

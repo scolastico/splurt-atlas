@@ -46,6 +46,7 @@ try {
       return route.fulfill({ status: 404 });
     });
     await page.goto('http://atlas.test/');
+    assert.equal(await page.locator('#search-panel h2').count(), 0);
     await page.evaluate(() => {
       document.querySelector('#explore-panel').hidden = true;
       document.querySelector('#search-panel').hidden = false;

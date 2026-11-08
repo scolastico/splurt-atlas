@@ -71,6 +71,13 @@ try {
   assert.equal(await page.locator('#map-statistics-list > div').count(), 17);
   assert.equal(
     await page
+      .locator('#map-statistics-list > div')
+      .last()
+      .evaluate((node) => getComputedStyle(node).borderBottomWidth),
+    '0px',
+  );
+  assert.equal(
+    await page
       .locator('#map-statistics')
       .textContent()
       .then((text) => text.includes('pre-round snapshot')),

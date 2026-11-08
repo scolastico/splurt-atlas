@@ -73,7 +73,9 @@ export function selectionCamera(params: URLSearchParams, map: MapMeta) {
   const zoom =
     params.has('s') && Number.isFinite(Number(params.get('s')))
       ? Math.max(0.04, Math.min(5, Number(params.get('s'))))
-      : 1;
+      : area
+        ? 1
+        : 2;
   return { x: (x - 0.5) * 32, y: (map.height - y + 0.5) * 32, z: area?.z ?? tile!.z, zoom };
 }
 

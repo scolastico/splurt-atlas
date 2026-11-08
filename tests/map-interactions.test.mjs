@@ -11,13 +11,13 @@ test('tile-only links center on the tile and supply the deck without pixel camer
     x: 2576,
     y: 560,
     z: 3,
-    zoom: 1,
+    zoom: 2,
   });
-  assert.deepEqual(selectionCamera(new URLSearchParams({ t: '81,183,3', s: '2' }), map), {
+  assert.deepEqual(selectionCamera(new URLSearchParams({ t: '81,183,3', s: '1.5' }), map), {
     x: 2576,
     y: 560,
     z: 3,
-    zoom: 2,
+    zoom: 1.5,
   });
   assert.equal(selectionCamera(new URLSearchParams({ t: '81,183,3', x: '12', y: '13' }), map), null);
   assert.equal(selectionCamera(new URLSearchParams({ t: '999,183,3' }), map), null);

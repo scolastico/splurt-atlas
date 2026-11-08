@@ -90,13 +90,28 @@ label.row small { color: #6f8191; }
   }
 
   /** What the status dot summarizes. */
+  function updateAvailable(status) {
+    const loaded = window.__atlasDev?.snapshot?.()?.dataset;
+    const published = status?.dataset;
+    if (!loaded || !published) return false;
+    const identity = (dataset) =>
+      JSON.stringify([
+        dataset.buildId || dataset.commit || '',
+        String(dataset.snapshot ?? dataset.dataPath ?? '')
+          .split('/')
+          .filter((part) => part && part !== 'snapshots')
+          .join('/'),
+      ]);
+    return identity(loaded) !== identity(published);
+  }
+
   function overall(status) {
     if (!status) return { kind: 'offline', text: 'Dev server unreachable' };
     if (!status.serving) return { kind: 'running', text: status.message || 'Preparing map data' };
     const job = status.generation?.job;
     if (job?.phase === 'running')
       return { kind: 'running', text: `Regenerating · ${Math.round(job.percent || 0)}%` };
-    if (job?.phase === 'published' && !status.generation?.stale)
+    if (updateAvailable(status) && !status.generation?.stale)
       return { kind: 'published', text: 'New map data ready, reload to use it' };
     if (job?.phase === 'error') return { kind: 'error', text: 'Generation failed' };
     if (status.external) return { kind: 'running', text: 'An export is running in another process' };
@@ -366,7 +381,7 @@ label.row small { color: #6f8191; }
           meanwhile.<br /><progress max="100" value="${Math.round(job.percent || 0)}"></progress>
           <div class="muted">${escape(job.message)}</div>
         </div>`;
-      else if (job?.phase === 'published' && !stale)
+      else if (updateAvailable(status) && !stale)
         notice = html`<div class="notice published">
           <strong>New map data is ready.</strong> Reload the page to switch to the new snapshot.
         </div>`;
@@ -398,7 +413,7 @@ label.row small { color: #6f8191; }
             Full rebuild
           </button>
           <button class="btn danger" data-action="cancel" ${running ? '' : 'disabled'}>Cancel</button>
-          ${job?.phase === 'published'
+          ${updateAvailable(status)
             ? html`<button class="btn primary" data-action="reload">Reload page</button>`
             : ''}
           ${job?.phase === 'error' && !status.serving

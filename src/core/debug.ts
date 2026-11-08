@@ -10,6 +10,13 @@ import { state } from './state.ts';
 
 function snapshot() {
   return {
+    dataset: state.manifest
+      ? {
+          buildId: state.manifest.buildId,
+          commit: state.manifest.commit,
+          dataPath: state.manifest.dataPath || '',
+        }
+      : null,
     map: state.map?.id || null,
     ready: state.ready,
     z: state.z,

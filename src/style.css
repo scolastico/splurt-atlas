@@ -409,6 +409,9 @@ input[type='checkbox'] {
   padding: 6px 0;
   border-bottom: 1px solid var(--line);
 }
+#map-statistics-list > div:last-child {
+  border-bottom: 0;
+}
 #map-statistics-list dt {
   color: var(--muted);
 }
