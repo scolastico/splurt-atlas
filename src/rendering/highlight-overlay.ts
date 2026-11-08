@@ -127,7 +127,8 @@ function drawHighlights(time = performance.now()): boolean {
       const up = link.targets.some((t) => t.z > link.z);
       const down = link.targets.some((t) => t.z < link.z);
       if (!up && !down) continue;
-      const size = Math.min(10, Math.max(3, state.zoom * 10)) / state.zoom;
+      // Follow the tile's scale, retaining a readable minimum when zoomed out.
+      const size = Math.max(10, lineWidth(3));
       const arrow = new Path2D();
       arrow.moveTo(x, y - size);
       arrow.lineTo(x, y + size);
@@ -144,10 +145,10 @@ function drawHighlights(time = performance.now()): boolean {
       target.lineJoin = 'round';
       target.lineCap = 'round';
       target.strokeStyle = '#09131f';
-      target.lineWidth = lineWidth(5);
+      target.lineWidth = Math.max(5, lineWidth(5));
       target.stroke(arrow);
       target.strokeStyle = '#d2f0ff';
-      target.lineWidth = lineWidth(2);
+      target.lineWidth = Math.max(2, lineWidth(2));
       target.stroke(arrow);
       target.lineCap = 'butt';
       target.lineJoin = 'miter';
