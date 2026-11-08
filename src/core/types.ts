@@ -89,7 +89,7 @@ export interface Atom {
   doorAccess?: DoorAccess;
   controlKeys?: ControlKey[];
   random?: {
-    kind: 'vending' | 'poster' | 'trash' | 'plant' | 'gibs' | 'forgery' | 'bookcase' | 'spawn';
+    kind: 'vending' | 'arcade' | 'poster' | 'trash' | 'plant' | 'gibs' | 'forgery' | 'bookcase' | 'spawn';
     guaranteed?: boolean;
   };
 }

@@ -3,6 +3,21 @@
 import { transitOverlays } from './transit-appearance.mjs';
 import { unquote } from './dm.mjs';
 import { safeAppearances } from './safe-appearance.mjs';
+import { arcadeOverlays } from './arcade-appearance.mjs';
+
+/** Map-loaded extinguisher cabinets create a full-size extinguisher and a door. */
+export function extinguisherCabinetAppearance(atom, db) {
+  const vars = { ...db.resolve(atom.path), ...atom.vars };
+  const body = { ...atom, vars: { ...atom.vars, icon_state: '"extinguisher_default"' } };
+  const opened = ['TRUE', '1'].includes(String(db.literal ? db.literal(vars.opened) : vars.opened));
+  const door = opened ? 'door_open' : 'door';
+  return [
+    db.hasIconState && !db.hasIconState(unquote(vars.icon), 'extinguisher_default') ? atom : body,
+    ...(!db.hasIconState || db.hasIconState(unquote(vars.icon), door)
+      ? [{ ...atom, vars: { ...atom.vars, icon_state: JSON.stringify(door) } }]
+      : []),
+  ];
+}
 
 /** Solar machinery creates raised panel/dish vis_contents during initialization. */
 export function solarOverlays(atom, db) {
@@ -97,6 +112,8 @@ export function expandStructures(atoms, db, depth = 0) {
   if (depth > 8) return atoms;
   return safeAppearances(atoms, db).flatMap((atom) => {
     const vars = { ...db.resolve(atom.path), ...atom.vars };
+    if (/^\/obj\/structure\/extinguisher_cabinet(?:\/|$)/.test(atom.path))
+      return extinguisherCabinetAppearance(atom, db);
     if (atom.path.includes('/atmospherics/components/')) {
       const state = unquote(vars.icon_state);
       if (state.includes('_map')) {
@@ -224,6 +241,7 @@ export function expandStructures(atoms, db, depth = 0) {
       ...closetOverlays(atom, db),
       ...lightOverlays(atom, db),
       ...solarOverlays(atom, db),
+      ...arcadeOverlays(atom, db),
     ];
   });
 }

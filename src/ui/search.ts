@@ -39,6 +39,17 @@ let finding: SearchRecord | null = null;
 let findingPage = 0;
 let findingIndex = 0;
 let locationTarget: RestoreTarget | null = null;
+let resolveLocation: (() => void) | null = null;
+
+function finishLocationRequest(): void {
+  resolveLocation?.();
+  resolveLocation = null;
+}
+
+export function restoreSearchQuery(query: string): void {
+  searchInput().value = query;
+  runSearch();
+}
 
 export function updateSearchReset(): void {
   $('reset-search').hidden = !$<HTMLInputElement>('search').value.length;
@@ -82,6 +93,7 @@ function showResults(data: { total: number; results: SearchHit[] }): void {
     const unit = result.kind === 'room' ? 'decks' : 'locations';
     button.innerHTML = `${escapeHtml(result.name)}<small>${kindMarkup(result)} · ${result.count} ${unit}</small>`;
     button.onclick = () => {
+      finishLocationRequest();
       locationTarget = null;
       worker?.postMessage({ type: 'locations', id: result.id, seq: ++locationSeq });
     };
@@ -161,6 +173,7 @@ function showFindings(): void {
 
 /** Drops the current finding group and its markers. */
 export function clearFinding(): void {
+  finishLocationRequest();
   finding = null;
   locationTarget = null;
   locationSeq++;
@@ -181,10 +194,14 @@ function kindMarkup(result: Pick<SearchRecord, 'kind' | 'kinds'>): string {
 }
 
 /** Shows a finding of a search record again, as the in-app history does. */
-export function showFinding(id: string, index: number, tile: string | null): void {
-  if (!state.searchReady) return;
+export function showFinding(id: string, index: number, tile: string | null): Promise<void> {
+  if (!state.searchReady || !worker) return Promise.resolve();
+  finishLocationRequest();
   locationTarget = { id, index, tile };
-  worker?.postMessage({ type: 'locations', id, seq: ++locationSeq });
+  return new Promise((resolve) => {
+    resolveLocation = resolve;
+    worker!.postMessage({ type: 'locations', id, seq: ++locationSeq });
+  });
 }
 
 /** Asks the worker which random spawns are recorded on a tile; the inspector shows the reply. */
@@ -265,6 +282,7 @@ export function startSearchWorker(
         } else resolveRestore();
         break;
       case 'error':
+        finishLocationRequest();
         $('search-status').textContent = data.message;
         resolveIndex();
         resolveRestore();
@@ -278,6 +296,7 @@ export function startSearchWorker(
       case 'locations':
         if (data.seq !== locationSeq) break;
         if (!data.result) {
+          finishLocationRequest();
           resolveRestore();
           break;
         }
@@ -292,6 +311,7 @@ export function startSearchWorker(
             locationTarget = null;
           }
           selectFinding(index, { focus: !restoring });
+          finishLocationRequest();
           resolveRestore();
         }
         break;

@@ -15,6 +15,10 @@ export function randomPreviewMarkup(atoms: Atom[], markers: boolean): string {
         note =
           atom.description ||
           'A vending machine is guaranteed here, but the displayed model is only one possible outcome.';
+      else if (atom.random?.kind === 'arcade')
+        note =
+          atom.description ||
+          'An arcade machine is guaranteed here; the displayed cabinet is one possible game, chosen at round start.';
       else if (atom.random?.kind === 'forgery')
         note =
           'This forgery imitates a randomly chosen item. The preview is one possible disguise, not the real item it resembles.';

@@ -9,6 +9,7 @@ const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
   const errors = [];
+  let documentLoads = 0;
   page.on('pageerror', (error) => {
     errors.push(error.message);
     console.error(error.message);
@@ -17,6 +18,7 @@ try {
   await page.route('http://atlas.test/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === '/') {
+      documentLoads++;
       const html = readFileSync('index.html', 'utf8').replace(
         '<script type="module" src="/src/main.ts"></script>',
         `<link rel="stylesheet" href="/src/style.css"><script type="importmap">{"imports":{"fuse.js":"/node_modules/fuse.js/dist/fuse.mjs"}}</script><script type="module">
@@ -24,7 +26,7 @@ try {
         import {initNetworkControls} from '/src/ui/infrastructure-controls.ts';
         import {initLayout} from '/src/ui/layout.ts';
         import {initCameraControls} from '/src/ui/camera.ts';
-        import {initHistory,recordJump,resetHistory} from '/src/ui/history.ts';
+        import {consumeHistoryHashChange,initHistory,recordJump,resetHistory} from '/src/ui/history.ts';
         import {inspect,inspectArea,initInspector} from '/src/ui/inspector.ts';
         import {initMapContextMenu} from '/src/ui/map-context-menu.ts';
         import {selectedArea} from '/src/model/view-state.ts';
@@ -32,13 +34,15 @@ try {
         import {tileCenterX,tileCenterY,worldToScreenX,worldToScreenY} from '/src/rendering/projection.ts';
         const definition = {area:0,turf:'/turf/open/floor',aperture:0,atoms:[{name:'Fixture chair',path:'/obj/structure/chair',description:'A chair.',vars:{},network:null,source:null}]};
         state.manifest = {repository:'https://example.test/upstream',commit:'fixture-commit',chunkTiles:16};
-        state.map = {id:'fixture',name:'Fixture Station',width:10,height:10,levels:[1],areas:[{name:'Fixture Room',path:'/area/fixture',region:'Test'}],definitions:[definition],files:['_maps/fixture.dmm'],infrastructure:{nodes:[],transitions:[]}};
+        state.map = {id:'fixture',name:'Fixture Station',width:10,height:10,levels:[1],areas:[{name:'Fixture Room',path:'/area/fixture',region:'Test'}],definitions:[definition],files:['_maps/fixture.dmm'],infrastructure:{powerNetworks:0,nodes:[],transitions:[]}};
         state.levels.set(1,{grid:new Uint32Array(100)});
         state.w=1200;state.h=900;state.x=160;state.y=160;state.zoom=1;state.ready=true;
         document.querySelector('#loading').hidden=true;
         Object.defineProperty(navigator,'clipboard',{value:{writeText:async value=>{window.copied=value;}}});
         initNetworkControls();initLayout(()=>{});initCameraControls();initHistory();initInspector();initMapContextMenu();paintMapStatistics();recordJump();
         window.fixture={state,inspect,inspectArea,resetHistory,recordJump,selectedArea};
+        window.unhandledHistoryHashes=0;
+        window.addEventListener('hashchange',()=>{if(!consumeHistoryHashChange())window.unhandledHistoryHashes++;});
         window.screenFor=(x,y)=>({x:worldToScreenX(tileCenterX(x)),y:worldToScreenY(tileCenterY(y))});
         window.fixtureReady=true;
       </script>`,
@@ -159,46 +163,62 @@ try {
     z: 1,
   });
   await page.evaluate(async () => {
-    const { goBack, goForward } = await import('/src/ui/history.ts');
     const saved = { ...window.fixture.state.selectedArea };
     window.fixture.inspectArea({ x1: 4, y1: 5, x2: 6, y2: 7, z: 1 });
     window.fixture.inspectArea(saved);
-    goBack();
-    if (window.fixture.state.selectedArea?.x1 !== 4) throw new Error('Area history was not restored');
-    goForward();
-    if (window.fixture.state.selectedArea?.x1 !== 5) throw new Error('Area forward history was not restored');
   });
-  // A full down/up/auxclick gesture is consumed exactly once, and boundaries pass through.
-  const result = await page.evaluate(() => {
-    const { state, inspect, resetHistory, recordJump } = window.fixture;
-    resetHistory();
-    state.selected = null;
-    state.selectedArea = null;
-    recordJump();
+  await page.goBack();
+  await page.waitForFunction(() => window.fixture.state.selectedArea?.x1 === 4);
+  await page.goForward();
+  await page.waitForFunction(() => window.fixture.state.selectedArea?.x1 === 5);
+  const previousLength = await page.evaluate(() => history.length);
+  await page.evaluate(() => {
+    const { inspect } = window.fixture;
     inspect(2, 2);
     inspect(3, 3);
-    const gesture = (button) =>
+  });
+  assert.equal(await page.evaluate(() => history.length), previousLength + 2);
+  const afterPan = await page.evaluate(async () => {
+    const { panBy, zoomBy } = await import('/src/ui/camera.ts');
+    const { share } = await import('/src/ui/url-state.ts');
+    for (let i = 0; i < 12; i++) {
+      panBy(1, 1);
+      zoomBy(1.01);
+    }
+    share(true);
+    return {
+      length: history.length,
+      x: window.fixture.state.x,
+      y: window.fixture.state.y,
+      zoom: window.fixture.state.zoom,
+    };
+  });
+  assert.equal(afterPan.length, previousLength + 2, 'camera movement never adds entries');
+  await page.goBack();
+  await page.waitForFunction(() => window.fixture.state.selected?.x === 2);
+  await page.goForward();
+  await page.waitForFunction(() => window.fixture.state.selected?.x === 3);
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      x: window.fixture.state.x,
+      y: window.fixture.state.y,
+      zoom: window.fixture.state.zoom,
+    })),
+    { x: afterPan.x, y: afterPan.y, zoom: afterPan.zoom },
+  );
+  const prevented = await page.evaluate(() =>
+    [3, 4].flatMap((button) =>
       ['mousedown', 'mouseup', 'auxclick'].map((type) => {
         const event = new MouseEvent(type, { button, bubbles: true, cancelable: true });
         document.dispatchEvent(event);
         return event.defaultPrevented;
-      });
-    const back = gesture(3),
-      afterBack = { ...state.selected };
-    gesture(3);
-    const boundaryBack = gesture(3);
-    const forward = gesture(4),
-      afterForward = { ...state.selected };
-    gesture(4);
-    const boundaryForward = gesture(4);
-    return { back, afterBack, boundaryBack, forward, afterForward, boundaryForward };
-  });
-  assert.deepEqual(result.afterBack, { x: 2, y: 2, z: 1 });
-  assert.deepEqual(result.back, [true, true, true]);
-  assert.deepEqual(result.boundaryBack, [false, false, false]);
-  assert.deepEqual(result.afterForward, { x: 2, y: 2, z: 1 });
-  assert.deepEqual(result.forward, [true, true, true]);
-  assert.deepEqual(result.boundaryForward, [false, false, false]);
+      }),
+    ),
+  );
+  assert.ok(
+    prevented.every((value) => !value),
+    'native mouse back/forward is never cancelled',
+  );
   await page.evaluate(() => {
     const { state, inspect } = window.fixture;
     const machine = (id, x, machineId) => ({
@@ -250,6 +270,7 @@ try {
   assert.deepEqual(await page.evaluate(() => window.fixture.state.selected), { x: 6, y: 4, z: 1 });
   assert.match(await page.locator('.telecomms-settings').textContent(), /145\.9 \(Common\)/);
   await page.locator('#history-back').click();
+  await page.waitForFunction(() => window.fixture.state.selected?.x === 4);
   assert.deepEqual(await page.evaluate(() => [...window.fixture.state.telecomHighlights]), [1]);
   await page.locator('#detailed-view').check();
   assert.match(await page.locator('.telecomms-settings').textContent(), /tcommsat/);
@@ -380,9 +401,60 @@ try {
   });
   assert.ok(markerColors.some((color) => color.startsWith('rgba(90,226,144,')));
   assert.ok(markerColors.some((color) => color.startsWith('rgba(255,207,114,')));
+  const beforeSearchNavigation = await page.evaluate(() => history.length);
+  const nextTile = await point(4, 5);
+  await page.mouse.click(nextTile.x, nextTile.y);
+  assert.equal(await page.evaluate(() => history.length), beforeSearchNavigation + 1);
+  await page.goBack();
+  await page.waitForFunction(
+    () => window.fixture.state.result === 'mixed' && window.fixture.state.markers.length === 6,
+  );
+  assert.deepEqual(await page.evaluate(() => window.fixture.state.selected), { x: 2, y: 2, z: 1 });
+  assert.equal(
+    await page.evaluate(() => history.length),
+    beforeSearchNavigation + 1,
+    'restoring an async search finding must not push another entry',
+  );
+  await page.goForward();
+  await page.waitForFunction(
+    () => window.fixture.state.selected?.x === 4 && window.fixture.state.result === null,
+  );
+  await page.goBack();
+  await page.waitForFunction(() => window.fixture.state.result === 'mixed');
+  const branchTile = await point(5, 5);
+  await page.mouse.click(branchTile.x, branchTile.y);
+  assert.equal(
+    await page.locator('#history-forward').isDisabled(),
+    true,
+    'a new selection replaces the forward branch',
+  );
+  assert.equal(await page.evaluate(() => history.length), beforeSearchNavigation + 1);
+  await page.evaluate(async () => {
+    const { state, inspect } = window.fixture;
+    const { setDeck } = await import('/src/ui/station.ts');
+    state.map.levels.push(2);
+    state.levels.set(2, { ...state.levels.get(1), z: 2 });
+    setDeck(2);
+    inspect(2, 2, 2);
+  });
+  await page.goBack();
+  await page.waitForFunction(() => window.fixture.state.z === 1 && window.fixture.state.selected?.x === 5);
+  await page.goForward();
+  await page.waitForFunction(() => window.fixture.state.z === 2 && window.fixture.state.selected?.z === 2);
+  await page.evaluate(() => history.go(-history.state.atlasSelection.position));
+  await page.waitForFunction(
+    () => history.state.atlasSelection.position === 0 && window.fixture.state.selected === null,
+  );
+  assert.equal(await page.locator('#history-back').isDisabled(), true);
   assert.deepEqual(errors, []);
+  assert.equal(documentLoads, 1, 'browser history never reloads the document');
+  assert.equal(
+    await page.evaluate(() => window.unhandledHistoryHashes),
+    0,
+    'managed Back/Forward must not trigger the map hash loader',
+  );
   console.log(
-    'Passed context clipboard actions, centered tile URLs, area selection/sharing/debug JSON, cancellation and mouse history boundaries.',
+    'Passed context actions, area sharing, native browser history for tiles/search/decks, camera replacements, highlights and marker colors without reloads.',
   );
 } finally {
   await browser.close();

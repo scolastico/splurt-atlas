@@ -4,6 +4,7 @@ import { $, checkbox } from '../core/dom.ts';
 import { invalidateUtilityPaths } from '../rendering/infrastructure-overlay.ts';
 import { updateSpaceAnimation } from '../rendering/space-background.ts';
 import { constrainCamera } from '../rendering/projection.ts';
+import { replaceHistoryView } from './history.ts';
 import type { Network } from '../core/types.ts';
 import { updateNetworkSummary, restoreInfrastructureOrder } from './infrastructure-controls.ts';
 import { infrastructureOrder, enabledNetworks, palette, state } from '../core/state.ts';
@@ -39,18 +40,20 @@ export function currentOptionMask(): number {
 
 /** Writes the current state into the URL fragment, immediately or after a short delay. */
 export function share(immediate = false): void {
-  clearTimeout(shareTimer);
-  const apply = () => {
-    constrainCamera();
-    state.optionMask = currentOptionMask();
-    if (!state.map) {
-      history.replaceState(null, '', optionsFragment());
-      return;
-    }
-    history.replaceState(null, '', viewFragment({ ...state, map: state.map, infrastructureOrder }));
-  };
+  cancelShare();
+  const apply = () => replaceHistoryView(currentViewFragment());
   if (immediate) apply();
   else shareTimer = setTimeout(apply, SHARE_DELAY_MS);
+}
+
+export function cancelShare(): void {
+  clearTimeout(shareTimer);
+}
+
+export function currentViewFragment(): string {
+  constrainCamera();
+  state.optionMask = currentOptionMask();
+  return state.map ? viewFragment({ ...state, map: state.map, infrastructureOrder }) : optionsFragment();
 }
 
 /** Applies the `o=` option bits of a link to the sidebar toggles. */
@@ -83,7 +86,8 @@ export function currentHashParams(): URLSearchParams {
 export function shareOptionsOnly(): void {
   const fragment =
     currentHashParams().has('o') || infrastructureOrderParam(infrastructureOrder) ? optionsFragment() : '';
-  history.replaceState(null, '', location.pathname + location.search + fragment);
+  cancelShare();
+  replaceHistoryView(location.pathname + location.search + fragment);
 }
 
 /** Every option toggle updates the link when it changes. */

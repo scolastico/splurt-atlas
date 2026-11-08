@@ -6,7 +6,11 @@ import { doorControlKeys } from './door-controls.mjs';
 import { digest } from './incremental.mjs';
 import { runtimeReplacement } from './runtime-terrain.mjs';
 import { tileLoot } from './spawn-records.mjs';
-import { randomSourceInfo, VENDING_PREVIEW_DESCRIPTION } from './random-appearances.mjs';
+import {
+  randomSourceInfo,
+  VENDING_PREVIEW_DESCRIPTION,
+  ARCADE_PREVIEW_DESCRIPTION,
+} from './random-appearances.mjs';
 
 /** Collects the areas of a map in first-seen order. */
 export function createAreaIndex(db) {
@@ -42,7 +46,12 @@ async function describeAtom(atom, atoms, { db, objectVisual, doorAccess }) {
   return {
     path: atom.path,
     name: unquote(vars.name) || pretty(atom.path),
-    description: random?.kind === 'vending' ? VENDING_PREVIEW_DESCRIPTION : unquote(vars.desc),
+    description:
+      random?.kind === 'vending'
+        ? VENDING_PREVIEW_DESCRIPTION
+        : random?.kind === 'arcade'
+          ? ARCADE_PREVIEW_DESCRIPTION
+          : unquote(vars.desc),
     random: random || undefined,
     visual: await objectVisual(atom, vars),
     doorAccess: door ? doorAccess(atoms, atom) : undefined,

@@ -23,7 +23,7 @@ async function openPage(context, url = 'http://atlas.test/') {
     if (pathname === '/') {
       const html = readFileSync('index.html', 'utf8').replace(
         '<script type="module" src="/src/main.ts"></script>',
-        `<link rel="stylesheet" href="/src/style.css"><script type="module">
+        `<link rel="stylesheet" href="/src/style.css"><script type="importmap">{"imports":{"fuse.js":"/node_modules/fuse.js/dist/fuse.mjs"}}</script><script type="module">
         import { initNetworkControls, updateNetworkSummary } from '/src/ui/infrastructure-controls.ts';
         import { initOptionSharing, restoreOptions } from '/src/ui/url-state.ts';
         import { state } from '/src/core/state.ts';
@@ -38,7 +38,11 @@ async function openPage(context, url = 'http://atlas.test/') {
       );
       return route.fulfill({ contentType: 'text/html', body: html });
     }
-    if (!pathname.startsWith('/src/') && !pathname.startsWith('/scripts/lib/'))
+    if (
+      !pathname.startsWith('/src/') &&
+      !pathname.startsWith('/scripts/lib/') &&
+      pathname !== '/node_modules/fuse.js/dist/fuse.mjs'
+    )
       return route.fulfill({ status: 404 });
     const file = path.resolve('.' + pathname);
     if (!file.startsWith(process.cwd() + path.sep)) return route.abort();

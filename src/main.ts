@@ -8,7 +8,7 @@ import { initDoorRoles } from './ui/door-roles.ts';
 import { $, checkbox } from './core/dom.ts';
 import { redraw } from './core/frame.ts';
 import { initNetworkControls } from './ui/infrastructure-controls.ts';
-import { initHistory } from './ui/history.ts';
+import { consumeHistoryHashChange, initHistory } from './ui/history.ts';
 import { clearInspectedResult, initInspector, paintInspector } from './ui/inspector.ts';
 import { initLayout, showSidebarView } from './ui/layout.ts';
 import { showLoadingError } from './ui/loading.ts';
@@ -61,6 +61,7 @@ function initStationSelection(): void {
   const select = $<HTMLSelectElement>('station');
   select.onchange = () => (select.value ? void loadStation(select.value) : showMapPicker());
   window.addEventListener('hashchange', () => {
+    if (consumeHistoryHashChange()) return;
     const id = currentHashParams().get('m');
     if (id && state.manifest?.maps.some((map) => map.id === id)) {
       select.value = id;

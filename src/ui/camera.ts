@@ -172,11 +172,9 @@ function onKeyDown(event: KeyboardEvent): void {
     showSidebarView('search');
     $('search').focus();
   }
-  // Alt+arrows step through the in-app history; the browser history is untouched.
+  // Let native navigation take over when there is no atlas entry in that direction.
   if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-    event.preventDefault();
-    if (event.key === 'ArrowLeft') goBack();
-    else goForward();
+    if (event.key === 'ArrowLeft' ? goBack() : goForward()) event.preventDefault();
     return;
   }
   if (event.ctrlKey || event.metaKey || event.altKey) return;

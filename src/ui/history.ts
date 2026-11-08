@@ -1,17 +1,15 @@
-// In-app back and forward navigation between jumps: tile selections, search
-// findings and door control links. Panning and zooming are not recorded, and
-// the browser history is never touched, so the back button of the browser
-// still leaves the page as expected.
+// Selection jumps are native same-document history entries. Camera and option
+// changes replace the current entry; popstate restores the view without reloading.
 import { $ } from '../core/dom.ts';
 import { redraw } from '../core/frame.ts';
 import { state } from '../core/state.ts';
 import type { AreaSelection, TileRef } from '../model/view-state.ts';
-import { clearSelection, inspect, inspectArea } from './inspector.ts';
-import { showFinding } from './search.ts';
-import { setDeck } from './station.ts';
-import { share } from './url-state.ts';
-
-const MAX_DEPTH = 50;
+import { validTelecomHighlights } from '../model/telecomms.ts';
+import { clearSelection, inspect, inspectArea, paintInspector } from './inspector.ts';
+import { showFinding, restoreSearchQuery } from './search.ts';
+import { loadStation, setDeck } from './station.ts';
+import { loadDoorRoles } from './door-roles.ts';
+import { cancelShare, currentViewFragment, restoreOptions, share } from './url-state.ts';
 
 interface ViewEntry {
   x: number;
@@ -26,9 +24,21 @@ interface ViewEntry {
   finding: number | null;
 }
 
-const entries: ViewEntry[] = [];
-let index = -1;
+interface BrowserEntry {
+  version: 1;
+  session: string;
+  position: number;
+  map: string;
+  view: ViewEntry;
+}
+
+const session = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const furthest = new Map<string, number>();
+let current: BrowserEntry | null = null;
 let restoring = false;
+let browserRestoring = false;
+let navigation = 0;
+let handledPopUrl: string | null = null;
 
 function capture(): ViewEntry {
   return {
@@ -45,7 +55,19 @@ function capture(): ViewEntry {
   };
 }
 
-/** Two entries are the same jump when they select the same thing on the same deck. */
+function readEntry(value: unknown): BrowserEntry | null {
+  const entry = (value as { atlasSelection?: BrowserEntry } | null)?.atlasSelection;
+  return entry?.version === 1 &&
+    typeof entry.session === 'string' &&
+    typeof entry.map === 'string' &&
+    Number.isSafeInteger(entry.position) &&
+    entry.position >= 0 &&
+    entry.view &&
+    [entry.view.x, entry.view.y, entry.view.zoom, entry.view.z].every(Number.isFinite)
+    ? entry
+    : null;
+}
+
 function sameJump(a: ViewEntry, b: ViewEntry): boolean {
   return (
     a.z === b.z &&
@@ -58,86 +80,69 @@ function sameJump(a: ViewEntry, b: ViewEntry): boolean {
   );
 }
 
+function write(entry: BrowserEntry, url: string, push: boolean): void {
+  const data = { ...history.state, atlasSelection: entry };
+  if (push) history.pushState(data, '', url);
+  else history.replaceState(data, '', url);
+  current = entry;
+  if (push) furthest.set(entry.session, entry.position);
+  else furthest.set(entry.session, Math.max(furthest.get(entry.session) || 0, entry.position));
+  updateButtons();
+}
+
 function updateButtons(): void {
   $<HTMLButtonElement>('history-back').disabled = !canGoBack();
   $<HTMLButtonElement>('history-forward').disabled = !canGoForward();
-  syncMouseHistory();
-}
-
-let mouseHistoryInstalled = false;
-let heldButton: number | null = null;
-let mouseNavigated = false;
-let releaseTimer: ReturnType<typeof setTimeout> | undefined;
-
-function mouseHistory(event: MouseEvent): void {
-  if (event.button !== 3 && event.button !== 4) return;
-  const available = event.button === 3 ? canGoBack() : canGoForward();
-  if (event.type === 'mousedown') {
-    heldButton = available ? event.button : null;
-    mouseNavigated = false;
-  }
-  if (heldButton !== event.button && !available) return;
-  event.preventDefault();
-  if (event.type !== 'mousedown' && !mouseNavigated) {
-    mouseNavigated = true;
-    heldButton = event.button;
-    if (event.button === 3) goBack();
-    else goForward();
-  }
-  clearTimeout(releaseTimer);
-  const release = () => {
-    heldButton = null;
-    mouseNavigated = false;
-    syncMouseHistory();
-  };
-  if (event.type === 'auxclick') release();
-  else releaseTimer = setTimeout(release, 1000);
-}
-
-/** No cancellation at a history boundary: the browser's own navigation takes over. */
-function syncMouseHistory(): void {
-  const needed = canGoBack() || canGoForward() || heldButton !== null;
-  if (needed === mouseHistoryInstalled) return;
-  mouseHistoryInstalled = needed;
-  for (const type of ['mousedown', 'mouseup', 'auxclick'] as const) {
-    if (needed) document.addEventListener(type, mouseHistory, true);
-    else document.removeEventListener(type, mouseHistory, true);
-  }
 }
 
 export function canGoBack(): boolean {
-  return index > 0;
+  return !!current && current.position > 0;
 }
-
 export function canGoForward(): boolean {
-  return index >= 0 && index < entries.length - 1;
+  return !!current && current.position < (furthest.get(current.session) || 0);
 }
 
-/** Records the current view as a jump target. Re-recording the same jump only refreshes its camera. */
-export function recordJump(): void {
-  if (restoring || !state.map) return;
-  const entry = capture();
-  if (index >= 0 && sameJump(entries[index], entry)) {
-    entries[index] = entry;
+/** Camera/options only refresh the current browser entry and its saved view. */
+export function replaceHistoryView(url: string): void {
+  if (browserRestoring) return;
+  const entry = readEntry(history.state);
+  if (entry && state.map?.id === entry.map) write({ ...entry, view: capture() }, url, false);
+  else {
+    const data = { ...history.state };
+    delete data.atlasSelection;
+    history.replaceState(data, '', url);
+    current = null;
     updateButtons();
-    return;
   }
-  entries.splice(index + 1);
-  entries.push(entry);
-  if (entries.length > MAX_DEPTH) entries.shift();
-  index = entries.length - 1;
-  updateButtons();
 }
 
+/** Every distinct selection pushes once. Re-selecting it or changing highlights replaces it. */
+export function recordJump(): void {
+  if (restoring || browserRestoring || !state.map) return;
+  cancelShare();
+  const url = currentViewFragment(),
+    view = capture();
+  const previous = readEntry(history.state);
+  const push =
+    !!previous &&
+    (previous.map !== state.map.id || (!state.loadingStation && !sameJump(previous.view, view)));
+  const entry: BrowserEntry = {
+    version: 1,
+    session: previous?.session || session,
+    position: previous ? previous.position + (push ? 1 : 0) : 0,
+    map: state.map.id,
+    view,
+  };
+  write(entry, url, push);
+}
+
+/** Map loading resets the active UI, while native history retains earlier maps and selections. */
 export function resetHistory(): void {
-  heldButton = null;
-  clearTimeout(releaseTimer);
-  entries.length = 0;
-  index = -1;
+  current = readEntry(history.state);
+  if (current) furthest.set(current.session, Math.max(furthest.get(current.session) || 0, current.position));
   updateButtons();
 }
 
-/** Runs `action` without recording the jumps it performs, such as restoring a link. */
 export function withoutHistory<T>(action: () => T): T {
   const previous = restoring;
   restoring = true;
@@ -148,48 +153,99 @@ export function withoutHistory<T>(action: () => T): T {
   }
 }
 
-function apply(entry: ViewEntry): void {
-  withoutHistory(() => {
-    state.x = entry.x;
-    state.y = entry.y;
-    state.zoom = entry.zoom;
-    if (state.z !== entry.z) setDeck(entry.z);
-    if (entry.selectedArea) inspectArea(entry.selectedArea, entry.telecomHighlights);
-    else if (entry.result && entry.finding !== null) {
-      const tile = entry.selected ? `${entry.selected.x},${entry.selected.y},${entry.selected.z}` : null;
-      showFinding(entry.result, entry.finding, tile);
-    } else if (entry.selected)
-      inspect(
-        entry.selected.x,
-        entry.selected.y,
-        entry.selected.z,
-        null,
-        entry.highlights,
-        entry.telecomHighlights,
-      );
-    else if (state.selected) clearSelection();
-  });
+async function apply(entry: ViewEntry, token: number): Promise<void> {
+  state.x = entry.x;
+  state.y = entry.y;
+  state.zoom = entry.zoom;
+  if (state.z !== entry.z) setDeck(entry.z);
+  if (entry.selectedArea) inspectArea(entry.selectedArea, entry.telecomHighlights);
+  else if (entry.result && entry.finding !== null && state.searchReady) {
+    const tile = entry.selected ? `${entry.selected.x},${entry.selected.y},${entry.selected.z}` : null;
+    await showFinding(entry.result, entry.finding, tile);
+    if (token !== navigation) return;
+    state.offsetHighlights = new Set(entry.highlights);
+    state.telecomHighlights = validTelecomHighlights(
+      state.map!,
+      state.selected,
+      state.selectedArea,
+      entry.telecomHighlights,
+    );
+    paintInspector();
+  } else if (entry.selected)
+    inspect(
+      entry.selected.x,
+      entry.selected.y,
+      entry.selected.z,
+      null,
+      entry.highlights,
+      entry.telecomHighlights,
+    );
+  else clearSelection();
   redraw();
-  share();
+}
+
+/** Popstate also emits hashchange; the normal hash loader must not load the map again. */
+export function consumeHistoryHashChange(): boolean {
+  const handled = handledPopUrl === location.href;
+  handledPopUrl = null;
+  return handled;
+}
+
+async function onPopState(event: PopStateEvent): Promise<void> {
+  const token = ++navigation;
+  cancelShare();
+  current = readEntry(event.state);
+  if (!current) {
+    browserRestoring = false;
+    updateButtons();
+    return;
+  }
+  const target = current;
+  furthest.set(target.session, Math.max(furthest.get(target.session) || 0, target.position));
+  browserRestoring = true;
+  handledPopUrl = location.href;
   updateButtons();
+  try {
+    if (state.map?.id === target.map && state.ready && !state.loadingStation) {
+      const params = new URLSearchParams(location.hash.slice(1));
+      restoreOptions(params);
+      loadDoorRoles(state.map, (params.get('j') || '').split(','));
+      restoreSearchQuery(params.get('q') || '');
+      await apply(target.view, token);
+    } else {
+      $<HTMLSelectElement>('station').value = target.map;
+      await loadStation(target.map, true);
+    }
+  } finally {
+    if (token === navigation) {
+      browserRestoring = false;
+      if (state.map?.id === target.map && state.ready) share(true);
+      updateButtons();
+    }
+  }
 }
 
 export function goBack(): boolean {
   if (!canGoBack()) return false;
-  index--;
-  apply(entries[index]);
+  cancelShare();
+  history.back();
   return true;
 }
 
 export function goForward(): boolean {
   if (!canGoForward()) return false;
-  index++;
-  apply(entries[index]);
+  cancelShare();
+  history.forward();
   return true;
 }
 
 export function initHistory(): void {
+  history.scrollRestoration = 'manual';
+  resetHistory();
   $('history-back').onclick = () => goBack();
   $('history-forward').onclick = () => goForward();
-  updateButtons();
+  // Mouse side buttons use native history, including browsers that cannot cancel them.
+  window.addEventListener('popstate', (event) => {
+    void onPopState(event);
+  });
 }

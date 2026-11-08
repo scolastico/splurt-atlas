@@ -1,8 +1,10 @@
 // Stable visual examples are previews, not a recreation of a round's random seed.
 import { splitTop } from './dmm.mjs';
 import { unquote } from './dm.mjs';
+import { arcadeOverlays } from './arcade-appearance.mjs';
 
 const VENDING = /^\/obj\/machinery\/vending(?:\/|$)/;
+const ARCADE = /^\/obj\/machinery\/computer\/arcade(?:\/|$)/;
 const RANDOM_SPAWNER = /^\/obj\/effect\/spawner\/random(?:\/|$)/;
 const pools = new WeakMap();
 const literal = (db, value) => String(db.literal ? db.literal(String(value ?? '')) : (value ?? ''));
@@ -85,11 +87,19 @@ function seedFor(atom, x, y, z) {
 
 /** Only finite, guaranteed, non-scattered vendor selections get a visual preview. */
 export function vendingPreviewPool(atom, db, seen = new Set()) {
+  return machinePreviewPool(atom, db, VENDING, seen);
+}
+
+export function arcadePreviewPool(atom, db, seen = new Set()) {
+  return machinePreviewPool(atom, db, ARCADE, seen);
+}
+
+function machinePreviewPool(atom, db, allowed, seen) {
   if (!RANDOM_SPAWNER.test(atom.path) || seen.has(atom.path) || seen.size >= 12) return [];
   const vars = { ...db.resolve(atom.path), ...atom.vars };
   if (!pools.has(db)) pools.set(db, new Map());
   const cache = pools.get(db);
-  const cacheKey = JSON.stringify([atom.path, atom.vars]);
+  const cacheKey = JSON.stringify([allowed.source, atom.path, atom.vars]);
   if (!seen.size && cache.has(cacheKey)) return cache.get(cacheKey);
   const remember = (value) => {
     if (!seen.size) cache.set(cacheKey, value);
@@ -122,16 +132,16 @@ export function vendingPreviewPool(atom, db, seen = new Set()) {
   ]) {
     const base = literal(db, vars[property]);
     if (!base || base === 'null') continue;
-    if (!VENDING.test(base)) return remember([]);
+    if (!allowed.test(base)) return remember([]);
     if (includeBase) paths.push(base);
     for (const type of db.types?.keys() || []) if (type.startsWith(base + '/')) paths.push(type);
   }
   const next = new Set(seen).add(atom.path);
   const candidates = [];
   for (const path of paths) {
-    if (VENDING.test(path)) candidates.push(path);
+    if (allowed.test(path)) candidates.push(path);
     else {
-      const nested = vendingPreviewPool({ path, vars: {} }, db, next);
+      const nested = machinePreviewPool({ path, vars: {} }, db, allowed, next);
       if (!nested.length) return remember([]);
       candidates.push(...nested);
     }
@@ -159,13 +169,18 @@ export function randomSourceInfo(atom, db) {
     /\/random(?:ise)?(?:\/|$)/.test(atom.path) ||
     (atom.path.includes('/spawner/') && vars.loot)
   ) {
-    return vendingPreviewPool(atom, db).length ? { kind: 'vending', guaranteed: true } : { kind: 'spawn' };
+    if (vendingPreviewPool(atom, db).length) return { kind: 'vending', guaranteed: true };
+    if (arcadePreviewPool(atom, db).length) return { kind: 'arcade', guaranteed: true };
+    return { kind: 'spawn' };
   }
   return null;
 }
 
 export const VENDING_PREVIEW_DESCRIPTION =
   'A vending machine is guaranteed to spawn here, but its exact model is not known. The normal atlas view shows one possible outcome; the actual machine is chosen when the round starts.';
+
+export const ARCADE_PREVIEW_DESCRIPTION =
+  'An arcade machine is guaranteed to spawn here. The normal atlas view shows one possible cabinet from the source pool; the actual game is chosen when the round starts.';
 
 /** Keep ordinary atoms untouched; give random previews and mapper markers separate channels. */
 export function randomAppearances(atoms, originals, x, y, z, db) {
@@ -226,7 +241,12 @@ export function randomAppearances(atoms, originals, x, y, z, db) {
         ];
       }
     }
-    const pool = info.kind === 'vending' ? vendingPreviewPool(atom, db) : [];
+    const pool =
+      info.kind === 'vending'
+        ? vendingPreviewPool(atom, db)
+        : info.kind === 'arcade'
+          ? arcadePreviewPool(atom, db)
+          : [];
     if (pool.length) {
       const path = pool[seedFor(atom, x, y, z) % pool.length];
       const chosen = db.resolve(path);
@@ -234,17 +254,16 @@ export function randomAppearances(atoms, originals, x, y, z, db) {
       const placement = { dir: literal(db, vars.dir || '2') };
       for (const key of ['pixel_x', 'pixel_y'])
         if (Number(literal(db, vars[key] || '0')) !== 0) placement[key] = literal(db, vars[key]);
-      return [
-        {
-          path,
-          vars: {
-            ...placement,
-            ...(chosen.icon ? { icon: chosen.icon } : {}),
-            ...(chosen.icon_state ? { icon_state: chosen.icon_state } : {}),
-            atlas_random_preview: '1',
-          },
+      const preview = {
+        path,
+        vars: {
+          ...placement,
+          ...(chosen.icon ? { icon: chosen.icon } : {}),
+          ...(chosen.icon_state ? { icon_state: chosen.icon_state } : {}),
+          atlas_random_preview: '1',
         },
-      ];
+      };
+      return [preview, ...(info.kind === 'arcade' ? arcadeOverlays(preview, db) : [])];
     }
     // Tag real poster/trash examples so the mapper foreground can omit only
     // randomized appearances while preserving every ordinary mapped object.
