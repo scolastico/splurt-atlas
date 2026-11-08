@@ -15,7 +15,7 @@ import { detailForZoom } from '../model/view-state.ts';
 
 /** Shade of a deck `depth` levels below the viewed one. */
 function deckShade(depth: number): number {
-  return Math.min(0.45, depth * 0.14);
+  return 1 - Math.pow(0.65, Math.max(0, depth));
 }
 
 let annotationsPainted = false;

@@ -6,7 +6,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { exportProgress } from '../export-progress.mjs';
 import { promote } from '../promote.mjs';
-import { expandStructures, randomisePosters, smoothAtoms } from './appearance.mjs';
+import { expandStructures, randomisePosters, randomiseTrash, smoothAtoms } from './appearance.mjs';
 import { unquote } from './dm.mjs';
 import { loadTypes } from './dm.mjs';
 import { createSpriteReader } from './dmi.mjs';
@@ -32,8 +32,14 @@ function buildAppearances(map, db) {
   const spatial = new Map(cells.map((cell) => [`${cell.x},${cell.y},${cell.z}`, expanded.get(cell.key)]));
   const at = (x, y, z) => spatial.get(`${x},${y},${z}`);
   for (const cell of cells)
-    cell.appearance = randomisePosters(
-      smoothAtoms(expanded.get(cell.key), cell.x, cell.y, cell.z, at, db),
+    cell.appearance = randomiseTrash(
+      randomisePosters(
+        smoothAtoms(expanded.get(cell.key), cell.x, cell.y, cell.z, at, db),
+        cell.x,
+        cell.y,
+        cell.z,
+        db,
+      ),
       cell.x,
       cell.y,
       cell.z,

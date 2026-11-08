@@ -292,6 +292,7 @@ select {
 }
 .search-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   font-size: 0.8125rem;
   color: #a5b4c0;

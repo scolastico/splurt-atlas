@@ -67,6 +67,7 @@ export function runSearch(): void {
     query,
     placed: state.placed,
     possible: state.possible,
+    exact: $<HTMLInputElement>('exact-search').checked,
   });
 }
 
@@ -78,7 +79,7 @@ function showResults(data: { total: number; results: SearchHit[] }): void {
     button.className = 'result';
     button.disabled = state.loadingStation;
     const unit = result.kind === 'room' ? 'decks' : 'locations';
-    button.innerHTML = `${escapeHtml(result.name)}<small>${escapeHtml(result.kind.toUpperCase())} · ${result.count} ${unit}</small>`;
+    button.innerHTML = `${escapeHtml(result.name)}<small>${escapeHtml((result.kinds?.join(' + ') || result.kind).toUpperCase())} · ${result.count} ${unit}</small>`;
     button.onclick = () => {
       locationTarget = null;
       worker?.postMessage({ type: 'locations', id: result.id, seq: ++locationSeq });
@@ -121,7 +122,7 @@ function showFindings(): void {
   const end = Math.min(finding.count, start + FINDINGS_PER_PAGE);
   panel.innerHTML = `<button class="back-to-search">← Search results</button>
 <h2>${escapeHtml(finding.name)}</h2>
-<p>${escapeHtml(finding.kind.toUpperCase())} · ${finding.count} findings</p>
+<p>${escapeHtml((finding.kinds?.join(' + ') || finding.kind).toUpperCase())} · ${finding.count} findings</p>
 <div class="finding-list"></div>
 <div class="finding-pages">
 <button class="previous" ${start === 0 ? 'disabled' : ''} aria-label="Previous findings">←</button>
@@ -308,5 +309,5 @@ export function initSearch(onReset: () => void): void {
     redraw();
     searchInput().focus();
   };
-  for (const key of ['placed', 'possible']) $(key).onchange = runSearch;
+  for (const key of ['placed', 'possible', 'exact-search']) $(key).onchange = runSearch;
 }

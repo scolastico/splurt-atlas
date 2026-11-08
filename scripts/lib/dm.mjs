@@ -217,7 +217,7 @@ export function classify(type) {
 
 export function aperture(turf) {
   if (/\/space(?:\/|$)|\/openspace(?:\/|$)/.test(turf)) return 255;
-  if (/\/floor\/glass(?:\/|$)/.test(turf)) return 190;
-  if (/\/catwalk(?:\/|$)/.test(turf)) return 145;
+  if (/\/floor\/glass(?:\/|$)/.test(turf)) return 95;
+  if (/\/catwalk(?:_floor)?(?:\/|$)/.test(turf)) return 145;
   return 0;
 }

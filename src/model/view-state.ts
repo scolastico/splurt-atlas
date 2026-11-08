@@ -52,6 +52,7 @@ export const optionBits = {
   'runtime-terrain': 14,
   fluid: 15,
   'mapping-helpers': 16,
+  'exact-search': 17,
 } as const;
 
 export type OptionKey = keyof typeof optionBits;

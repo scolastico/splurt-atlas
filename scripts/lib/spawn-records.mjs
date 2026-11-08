@@ -4,6 +4,43 @@ import { pretty, unquote } from './dm.mjs';
 
 /** Spawners nested deeper than this are not followed. */
 const MAX_SPAWNER_DEPTH = 12;
+const closetMethods = new WeakMap();
+
+/** Literal item constructions inside population methods, including conditional contents.
+ * These are candidates, since conditions and random rolls are not executed. */
+export function closetCandidates(db, type, seen = new Set()) {
+  if (!/^\/obj\/structure\/closet(?:\/|$)/.test(type) || seen.has(type)) return [];
+  seen.add(type);
+  if (!closetMethods.has(db)) {
+    const methods = new Map();
+    for (const [, text] of db.files || [])
+      for (const match of text.matchAll(
+        /^(\/obj\/structure\/closet[\w/]*?)\/(?:proc\/)?(PopulateContents|populate_contents_immediate)\([^\n]*\)\s*\n([\s\S]*?)(?=^\/|^(?![\t \r\n])\S|(?![\s\S]))/gm,
+      )) {
+        const key = `${match[1]}:${match[2]}`;
+        methods.set(key, [...(methods.get(key) || []), match[3]]);
+      }
+    closetMethods.set(db, methods);
+  }
+  const methods = closetMethods.get(db);
+  const collect = (path, method, visited = new Set()) => {
+    if (!path || visited.has(path)) return [];
+    visited.add(path);
+    const bodies = methods.get(`${path}:${method}`);
+    const parent = db.types?.get(path)?.vars?.parent_type || path.slice(0, path.lastIndexOf('/'));
+    const inherited =
+      !bodies || bodies.some((body) => /\.\.\(/.test(body)) ? collect(parent, method, visited) : [];
+    return [
+      ...inherited,
+      ...(bodies || []).flatMap((body) =>
+        [...body.matchAll(/\bnew\s+(\/obj\/[\w/]+)\s*\(\s*src\b/g)].map((match) => match[1]),
+      ),
+    ];
+  };
+  return [
+    ...new Set([...collect(type, 'PopulateContents'), ...collect(type, 'populate_contents_immediate')]),
+  ].flatMap((path) => (path.includes('/spawner/') ? spawnCandidates(db, path, db.resolve(path)) : [path]));
+}
 
 /**
  * The object paths a random spawner may produce, following literal
@@ -36,6 +73,13 @@ export function tileLoot(db, atoms, unresolved) {
     const vars = { ...db.resolve(atom.path), ...atom.vars };
     if (atom.path.startsWith('/obj/item/'))
       loot.push({ path: atom.path, name: unquote(vars.name) || pretty(atom.path), kind: 'placed' });
+    for (const candidate of closetCandidates(db, atom.path))
+      loot.push({
+        path: candidate,
+        name: unquote(db.resolve(candidate).name) || pretty(candidate),
+        kind: 'possible',
+        spawner: atom.path,
+      });
     if (atom.path.includes('/spawner/') || atom.path.includes('/random')) {
       const possible = spawnCandidates(db, atom.path, vars);
       if (!possible.length) unresolved.push(atom.path);

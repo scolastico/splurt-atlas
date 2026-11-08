@@ -369,6 +369,12 @@ export function paintInspector(): void {
   const detailed = isChecked('detailed-view');
   const inspector = $('inspector');
   inspector.innerHTML = detailed ? detailedHtml : friendlyMarkup(x, y, z, definition);
+  if (detailed && tileCandidates.length) {
+    const candidates = document.createElement('details');
+    candidates.open = true;
+    candidates.innerHTML = `<summary>Possible contents (${tileCandidates.length})</summary><p>Static loot candidates, including closet contents. No probability is inferred.</p><ul>${tileCandidates.map((item) => `<li>${escapeHtml(item.name)}<br><code>${escapeHtml(item.path)}</code></li>`).join('')}</ul>`;
+    inspector.append(candidates);
+  }
   const doors = definition.atoms.filter(
     (atom): atom is Atom & { doorAccess: DoorAccess } => !!atom.doorAccess,
   );
@@ -411,10 +417,21 @@ export function inspect(
   if (!result) clearFinding();
   state.selectionPulseStart = performance.now();
   let shownResult: typeof inspectedResult = result;
-  if (result?.kind === 'possible') {
+  if (result?.kinds?.length && result.placedPoints) {
+    let placed = false;
+    for (let p = 0; p < result.placedPoints.length; p += 3)
+      if (
+        result.placedPoints[p] === x &&
+        result.placedPoints[p + 1] === y &&
+        result.placedPoints[p + 2] === z
+      )
+        placed = true;
+    shownResult = { ...result, kind: placed ? 'placed' : 'possible' };
+  }
+  if (shownResult?.kind === 'possible' && result) {
     const contents = definition.atoms.filter((atom) => !atom.path.startsWith('/turf/'));
     shownResult = {
-      ...result,
+      ...shownResult,
       spawner:
         contents.find((atom) => result.spawners?.includes(atom.path))?.path ||
         result.spawners?.[0] ||

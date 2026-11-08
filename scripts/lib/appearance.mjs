@@ -1,6 +1,57 @@
 // Deterministic map-load structures and ordinary bitmask smoothing can be
 // resolved statically. Arbitrary Initialize()/update_appearance() code cannot.
 import { transitOverlays } from './transit-appearance.mjs';
+import { unquote } from './dm.mjs';
+
+/** Reconstruct the static door and status overlays used by closet_update_overlays. */
+export function closetOverlays(atom, db) {
+  if (!/^\/obj\/structure\/closet(?:\/|$)/.test(atom.path)) return [];
+  // Crates override closet_update_overlays and carry their lid in the base sprite.
+  if (/^\/obj\/structure\/closet\/crate(?:\/|$)/.test(atom.path)) return [];
+  const vars = { ...db.resolve(atom.path), ...atom.vars };
+  const flag = (key) => ['TRUE', '1'].includes(String(db.literal ? db.literal(vars[key]) : vars[key]));
+  const base = unquote(
+    vars.base_icon_state && vars.base_icon_state !== 'null' ? vars.base_icon_state : vars.icon_state,
+  );
+  const states = [];
+  if (flag('enable_door_overlay')) {
+    if (flag('opened') && flag('has_opened_overlay')) states.push(`${base}_open`);
+    else if (flag('has_closed_overlay'))
+      states.push(`${unquote(vars.icon_door && vars.icon_door !== 'null' ? vars.icon_door : base)}_door`);
+  }
+  if (!flag('opened')) {
+    if (flag('welded') && vars.icon_welded) states.push(unquote(vars.icon_welded));
+    if (flag('broken') && flag('secure')) states.push(unquote(vars.icon_broken));
+    else if (!flag('broken') && flag('secure')) states.push(flag('locked') ? 'locked' : 'unlocked');
+  }
+  return states
+    .filter((state) => !db.hasIconState || db.hasIconState(unquote(vars.icon), state))
+    .map((state) => ({ ...atom, vars: { ...atom.vars, icon_state: JSON.stringify(state) } }));
+}
+
+/** A stable visual example of the same trash-pile pool used by Initialize. */
+export function randomiseTrash(atoms, x, y, z, db) {
+  const states = [
+    'pile1',
+    'pile2',
+    'pilechair',
+    'piletable',
+    'pilevending',
+    'brtrashpile',
+    'microwavepile',
+    'rackpile',
+    'boxfort',
+    'trashbag',
+    'brokecomp',
+  ];
+  return atoms.map((atom) => {
+    if (!/^\/obj\/structure\/trash_pile(?:\/|$)/.test(atom.path)) return atom;
+    const vars = { ...db.resolve(atom.path), ...atom.vars };
+    if (unquote(vars.icon_state) !== 'randompile') return atom;
+    const seed = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0;
+    return { ...atom, vars: { ...atom.vars, icon_state: JSON.stringify(states[seed % states.length]) } };
+  });
+}
 export function expandStructures(atoms, db, depth = 0) {
   if (depth > 8) return atoms;
   return atoms.flatMap((atom) => {
@@ -52,7 +103,7 @@ export function expandStructures(atoms, db, depth = 0) {
       const directions = { north: '1', south: '2', east: '4', west: '8' };
       return [{ path: parent, vars: { ...atom.vars, dir: directions[atom.path.split('/').at(-1)] || '2' } }];
     }
-    return [atom, ...transitOverlays(atom, db)];
+    return [atom, ...transitOverlays(atom, db), ...closetOverlays(atom, db)];
   });
 }
 

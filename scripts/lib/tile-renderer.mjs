@@ -3,7 +3,7 @@
 import sharp from 'sharp';
 import { aperture, unquote } from './dm.mjs';
 import { objectOffsets } from './object-offsets.mjs';
-import { bakedChannel } from './utility-visibility.mjs';
+import { bakedChannel, underCatwalk } from './utility-visibility.mjs';
 
 const numeric = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 
@@ -27,7 +27,7 @@ export function createTileRenderer({ db, sprites, tilePixels }) {
   /** Rendered images keyed by the exact atom list, so identical tiles render once. */
   const cache = new Map();
 
-  async function renderLayers(atoms) {
+  async function renderLayers(atoms, underfloor = []) {
     const layers = [];
     for (const atom of atoms) {
       const vars = objectOffsets(atom.path, { ...db.resolve(atom.path), ...atom.vars }, db);
@@ -70,7 +70,7 @@ export function createTileRenderer({ db, sprites, tilePixels }) {
       const layer = DISPOSAL_PIPE.test(atom.path)
         ? DISPOSAL_LAYER
         : numeric(vars.layer, defaultLayer(atom.path));
-      layers.push({ input: sprite.input, left, top, layer });
+      layers.push({ input: sprite.input, left, top, layer: underfloor.includes(atom) ? layer - 100 : layer });
     }
     return layers;
   }
@@ -78,11 +78,15 @@ export function createTileRenderer({ db, sprites, tilePixels }) {
   return {
     /** A PNG of the channel's sprites on a 3×3-tile canvas, or null when nothing draws. */
     render(atoms, channel) {
-      const selected = atoms.filter((atom) => bakedChannel(atom, atoms, db) === channel && !invisible(atom));
-      const key = JSON.stringify(selected);
+      const underfloor = channel === 'base' ? atoms.filter((atom) => underCatwalk(atom, atoms, db)) : [];
+      const selected = atoms.filter(
+        (atom) =>
+          (bakedChannel(atom, atoms, db) === channel || underfloor.includes(atom)) && !invisible(atom),
+      );
+      const key = JSON.stringify([selected, underfloor]);
       let job = cache.get(key);
       if (!job) {
-        job = renderLayers(selected).then((layers) => {
+        job = renderLayers(selected, underfloor).then((layers) => {
           if (!layers.length) return null;
           layers.sort((a, b) => a.layer - b.layer);
           return sharp({ create: { width: S * 3, height: S * 3, channels: 4, background: '#00000000' } })

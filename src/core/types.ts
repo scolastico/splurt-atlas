@@ -222,6 +222,8 @@ export interface SearchRecord {
   name: string;
   path: string;
   kind: 'room' | 'placed' | 'possible';
+  kinds?: ('placed' | 'possible')[];
+  placedPoints?: number[];
   region?: string;
   points: number[];
   spawners: string[];
@@ -229,7 +231,7 @@ export interface SearchRecord {
 }
 
 /** A search hit as listed in the sidebar (points stripped). */
-export type SearchHit = Omit<SearchRecord, 'points' | 'spawners'>;
+export type SearchHit = Omit<SearchRecord, 'points' | 'spawners' | 'placedPoints'>;
 
 export interface TileCandidate {
   name: string;
