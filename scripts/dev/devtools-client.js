@@ -29,14 +29,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); z-index: 2147483001; display: none; flex-direction: column;
   background: #0f1821; border-left: 1px solid #2d3a47; box-shadow: -8px 0 30px #0008; }
 .panel.open { display: flex; }
-header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #243040; }
+header { display: flex; flex-shrink: 0; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #243040; }
 header h1 { font-size: 13px; margin: 0; letter-spacing: .1em; text-transform: uppercase; flex: 1; }
 header .close { background: none; border: 0; font-size: 18px; color: #9fb0c0; padding: 2px 6px; }
-nav { display: flex; border-bottom: 1px solid #243040; overflow-x: auto; }
+nav { display: flex; flex-shrink: 0; border-bottom: 1px solid #243040; overflow-x: auto; }
 nav button { flex: 1; background: none; border: 0; border-bottom: 2px solid transparent; padding: 9px 6px; color: #9fb0c0; font-size: 12px; white-space: nowrap; }
 nav button[aria-selected="true"] { color: #e3eef7; border-bottom-color: #7ddfc6; }
-section { flex: 1; overflow: auto; padding: 14px; display: none; }
+section { flex: 1; min-height: 0; overflow: auto; padding: 14px; display: none; }
 section.active { display: block; }
+section[data-tab="progress"].active { display: flex; flex-direction: column; }
+section[data-tab="progress"] > :not(.log) { flex-shrink: 0; }
 h2 { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #7ddfc6; margin: 14px 0 6px; }
 h2:first-child { margin-top: 0; }
 dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; }
@@ -49,7 +51,7 @@ dt { color: #9fb0c0; } dd { margin: 0; word-break: break-all; }
 .notice.stale { border-color: #8a7a2c; } .notice.published { border-color: #2f7f6c; } .notice.error { border-color: #7d3a40; } .notice.running { border-color: #35628f; }
 progress { width: 100%; height: 10px; accent-color: #7ddfc6; }
 ul { margin: 6px 0; padding-left: 18px; } li { margin: 3px 0; }
-.log { font-family: ui-monospace, monospace; font-size: 11px; max-height: 260px; overflow: auto; background: #0b1218; border: 1px solid #243040; border-radius: 6px; padding: 6px 8px; }
+.log { flex: 1 1 auto; min-height: 120px; font-family: ui-monospace, monospace; font-size: 11px; overflow: auto; background: #0b1218; border: 1px solid #243040; border-radius: 6px; padding: 6px 8px; }
 .log div { white-space: pre-wrap; } .log time { color: #6f8191; margin-right: 6px; }
 label.row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 label.row small { color: #6f8191; }
@@ -248,7 +250,12 @@ label.row small { color: #6f8191; }
       const section = this.$(`section[data-tab="${this.tab}"]`);
       const focused = this.shadow.activeElement;
       if (focused && section.contains(focused) && focused.matches('input, button')) return; // do not disturb interaction
+      const oldLog = section.querySelector('.log');
+      const logOffset = oldLog?.scrollTop || 0,
+        oldHeight = oldLog?.scrollHeight || 0;
       section.innerHTML = renderers[this.tab].call(this);
+      const newLog = section.querySelector('.log');
+      if (newLog && logOffset > 0) newLog.scrollTop = logOffset + newLog.scrollHeight - oldHeight;
       this.bind(section);
     }
 

@@ -21,6 +21,7 @@ interface ViewEntry {
   selected: TileRef | null;
   selectedArea: AreaSelection | null;
   highlights: number[];
+  telecomHighlights: number[];
   result: string | null;
   finding: number | null;
 }
@@ -38,6 +39,7 @@ function capture(): ViewEntry {
     selected: state.selected ? { ...state.selected } : null,
     selectedArea: state.selectedArea ? { ...state.selectedArea } : null,
     highlights: [...state.offsetHighlights],
+    telecomHighlights: [...state.telecomHighlights],
     result: state.result,
     finding: state.finding,
   };
@@ -152,12 +154,19 @@ function apply(entry: ViewEntry): void {
     state.y = entry.y;
     state.zoom = entry.zoom;
     if (state.z !== entry.z) setDeck(entry.z);
-    if (entry.selectedArea) inspectArea(entry.selectedArea);
+    if (entry.selectedArea) inspectArea(entry.selectedArea, entry.telecomHighlights);
     else if (entry.result && entry.finding !== null) {
       const tile = entry.selected ? `${entry.selected.x},${entry.selected.y},${entry.selected.z}` : null;
       showFinding(entry.result, entry.finding, tile);
     } else if (entry.selected)
-      inspect(entry.selected.x, entry.selected.y, entry.selected.z, null, entry.highlights);
+      inspect(
+        entry.selected.x,
+        entry.selected.y,
+        entry.selected.z,
+        null,
+        entry.highlights,
+        entry.telecomHighlights,
+      );
     else if (state.selected) clearSelection();
   });
   redraw();

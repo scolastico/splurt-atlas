@@ -136,6 +136,7 @@ export interface ShareableView {
   optionMask?: number;
   doorRoles?: string[];
   offsetHighlights?: Set<number>;
+  telecomHighlights?: Set<number>;
   infrastructureOrder?: readonly Infrastructure[];
 }
 
@@ -166,5 +167,7 @@ export function viewFragment(view: ShareableView): string {
   if (view.doorRoles?.length) params.set('j', view.doorRoles.join(','));
   if (view.offsetHighlights?.size)
     params.set('h', [...view.offsetHighlights].sort((a, b) => a - b).join(','));
+  if (view.telecomHighlights?.size)
+    params.set('c', [...view.telecomHighlights].sort((a, b) => a - b).join(','));
   return `#${params}`;
 }

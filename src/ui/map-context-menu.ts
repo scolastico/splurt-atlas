@@ -95,6 +95,7 @@ export function contextDebugInfo(tile: TileRef, area: AreaSelection | null): obj
     infrastructure: {
       nodes: (map.infrastructure?.nodes || []).filter((node) => contains(bounds, node)),
       transitions: (map.infrastructure?.transitions || []).filter((link) => contains(bounds, link)),
+      telecomms: (map.telecomms || []).filter((machine) => contains(bounds, machine)),
     },
     camera: { x: state.x, y: state.y, z: state.z, zoom: state.zoom, tilePixels: TILE },
   };

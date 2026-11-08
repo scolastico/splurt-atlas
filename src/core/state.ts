@@ -36,6 +36,7 @@ export interface ViewerState {
   selectionDraft: AreaSelection | null;
   /** Indices of offset-drawn objects on the selected tile that are highlighted. */
   offsetHighlights: Set<number>;
+  telecomHighlights: Set<number>;
   /** When the selection pulse animation started. */
   selectionPulseStart: number;
   motion: boolean;
@@ -71,6 +72,7 @@ export const state: ViewerState = {
   selectedArea: null,
   selectionDraft: null,
   offsetHighlights: new Set(),
+  telecomHighlights: new Set(),
   selectionPulseStart: -Infinity,
   motion: true,
   cutaway: true,

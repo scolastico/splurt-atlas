@@ -14,6 +14,7 @@ import {
   worldToScreenY,
 } from './projection.ts';
 import { definitionAt, reducedMotion, state, TILE } from '../core/state.ts';
+import { selectedTelecomms } from '../model/telecomms.ts';
 
 const OVERLAY_FPS = 30;
 const PULSE_PERIOD_MS = 1800;
@@ -34,6 +35,7 @@ function wantsOverlay(): boolean {
     getDoorMarkers().length ||
     state.markers.length ||
     (state.selected?.z === state.z && state.offsetHighlights.size) ||
+    (state.selected?.z === state.z && state.telecomHighlights.size) ||
     transitions
   );
 }
@@ -74,6 +76,23 @@ function drawHighlights(time = performance.now()): boolean {
   for (const marker of getDoorMarkers()) ring(marker.x, marker.y, marker.z, DOOR_COLORS[marker.status]);
   for (let index = 0; index < state.markers.length; index += 3)
     ring(state.markers[index], state.markers[index + 1], state.markers[index + 2], FINDING_COLOR);
+
+  if (state.selected?.z === state.z && state.telecomHighlights.size) {
+    const sources = selectedTelecomms(map, state.selected, state.selectedArea);
+    for (const machine of map.telecomms || []) {
+      if (machine.z !== state.z || !state.telecomHighlights.has(machine.id)) continue;
+      ring(machine.x, machine.y, machine.z, '106,224,255');
+      target.strokeStyle = `rgba(106,224,255,${0.5 + pulse * 0.3})`;
+      target.lineWidth = lineWidth(2);
+      for (const source of sources.filter((source) => source.links.includes(machine.id))) {
+        visible = true;
+        target.beginPath();
+        target.moveTo(tileCenterX(source.x), tileCenterY(source.y));
+        target.lineTo(tileCenterX(machine.x), tileCenterY(machine.y));
+        target.stroke();
+      }
+    }
+  }
 
   // Callouts from the selected tile to objects drawn beside it.
   if (state.selected?.z === state.z && state.offsetHighlights.size) {

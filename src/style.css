@@ -289,9 +289,7 @@ input[type='checkbox'] {
   line-height: 1.6;
 }
 #results {
-  max-height: 260px;
-  overflow: auto;
-  scrollbar-width: thin;
+  min-width: 0;
 }
 .result {
   width: 100%;
@@ -1580,4 +1578,29 @@ body.resizing #map-picker {
 
 #map.selecting-area {
   cursor: crosshair;
+}
+.telecomms-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.telecomms-settings dt {
+  color: var(--muted);
+  margin-top: 8px;
+}
+.telecomms-settings dd {
+  margin: 0;
+}
+.telecomms-target {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+  font-size: 0.8125rem;
+}
+.telecomms-link {
+  flex: 1;
+  color: #8ed5ec;
 }

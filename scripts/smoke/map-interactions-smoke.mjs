@@ -25,7 +25,7 @@ try {
         import {initLayout} from '/src/ui/layout.ts';
         import {initCameraControls} from '/src/ui/camera.ts';
         import {initHistory,recordJump,resetHistory} from '/src/ui/history.ts';
-        import {inspect,inspectArea} from '/src/ui/inspector.ts';
+        import {inspect,inspectArea,initInspector} from '/src/ui/inspector.ts';
         import {initMapContextMenu} from '/src/ui/map-context-menu.ts';
         import {selectedArea} from '/src/model/view-state.ts';
         import {paintMapStatistics} from '/src/ui/map-statistics.ts';
@@ -37,7 +37,7 @@ try {
         state.w=1200;state.h=900;state.x=160;state.y=160;state.zoom=1;state.ready=true;
         document.querySelector('#loading').hidden=true;
         Object.defineProperty(navigator,'clipboard',{value:{writeText:async value=>{window.copied=value;}}});
-        initNetworkControls();initLayout(()=>{});initCameraControls();initHistory();initMapContextMenu();paintMapStatistics();recordJump();
+        initNetworkControls();initLayout(()=>{});initCameraControls();initHistory();initInspector();initMapContextMenu();paintMapStatistics();recordJump();
         window.fixture={state,inspect,inspectArea,resetHistory,recordJump,selectedArea};
         window.screenFor=(x,y)=>({x:worldToScreenX(tileCenterX(x)),y:worldToScreenY(tileCenterY(y))});
         window.fixtureReady=true;
@@ -199,6 +199,61 @@ try {
   assert.deepEqual(result.afterForward, { x: 2, y: 2, z: 1 });
   assert.deepEqual(result.forward, [true, true, true]);
   assert.deepEqual(result.boundaryForward, [false, false, false]);
+  await page.evaluate(() => {
+    const { state, inspect } = window.fixture;
+    const machine = (id, x, machineId) => ({
+      id,
+      x,
+      y: 4,
+      z: 1,
+      atomIndex: 0,
+      path: '/obj/machinery/telecomms/' + (id ? 'server' : 'hub'),
+      name: id ? 'telecommunication server' : 'telecommunication hub',
+      machineId,
+      network: 'tcommsat',
+      autolinkers: ['common'],
+      frequencyMode: id ? 'filtered' : 'all',
+      frequencies: id ? [{ value: 1459, name: 'Common' }] : [],
+      longRange: !id,
+      enabled: true,
+      unresolved: [],
+      links: [id ? 0 : 1],
+    });
+    state.map.telecomms = [machine(0, 4, 'Hub'), machine(1, 6, 'Common Server')];
+    for (const device of state.map.telecomms) {
+      const definition = {
+        area: 0,
+        turf: '/turf/open/floor',
+        aperture: 0,
+        atoms: [
+          {
+            path: device.path,
+            name: device.name,
+            vars: {},
+            description: 'Fixture telecomms',
+            network: null,
+            source: null,
+          },
+        ],
+      };
+      state.map.definitions.push(definition);
+      state.levels.get(1).grid[(10 - device.y) * 10 + device.x - 1] = state.map.definitions.length - 1;
+    }
+    inspect(4, 4);
+  });
+  assert.match(await page.locator('.telecomms-settings').textContent(), /tcommsat/);
+  assert.match(await page.locator('.telecomms-settings').textContent(), /All frequencies/);
+  await page.getByRole('checkbox', { name: 'Highlight Common Server', exact: true }).check();
+  assert.deepEqual(await page.evaluate(() => [...window.fixture.state.telecomHighlights]), [1]);
+  await page.waitForFunction(() => new URLSearchParams(location.hash.slice(1)).get('c') === '1');
+  await page.locator('.telecomms-link').click();
+  assert.deepEqual(await page.evaluate(() => window.fixture.state.selected), { x: 6, y: 4, z: 1 });
+  assert.match(await page.locator('.telecomms-settings').textContent(), /145\.9 \(Common\)/);
+  await page.locator('#history-back').click();
+  assert.deepEqual(await page.evaluate(() => [...window.fixture.state.telecomHighlights]), [1]);
+  await page.locator('#detailed-view').check();
+  assert.match(await page.locator('.telecomms-settings').textContent(), /tcommsat/);
+  await page.locator('#detailed-view').uncheck();
   const roomText = await page.evaluate(async () => {
     const { drawAnnotations } = await import('/src/rendering/annotations.ts');
     const { state } = window.fixture;

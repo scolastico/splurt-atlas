@@ -22,6 +22,8 @@ import { viewFragment } from '../model/view-state.ts';
 import { randomPreviewMarkup } from '../model/random-preview.ts';
 import type { AreaSelection } from '../model/view-state.ts';
 import { selectionDefinitions } from '../model/selection-data.ts';
+import { validTelecomHighlights } from '../model/telecomms.ts';
+import { telecommsSections } from './telecomms.ts';
 
 /** The finding shown with the selection, if the selection came from a search result. */
 let inspectedResult: (SearchRecord & { spawner?: string }) | null = null;
@@ -67,6 +69,7 @@ export function clearSelection(): void {
   state.selectedArea = null;
   state.selectionDraft = null;
   state.offsetHighlights = new Set();
+  state.telecomHighlights = new Set();
   $<HTMLButtonElement>('inspect-tab').disabled = true;
   showSidebarView('explore');
   redraw();
@@ -230,6 +233,7 @@ function controlLink(control: DoorControl): HTMLAnchorElement {
     zoom: Math.max(state.zoom, 1),
     selected: control,
     selectedArea: null,
+    telecomHighlights: new Set(),
     result: null,
     finding: null,
     offsetHighlights: new Set([control.atomIndex]),
@@ -404,6 +408,7 @@ export function paintInspector(): void {
   }
   const offsets = offsetObjectsSection(definition);
   if (offsets) inspector.append(offsets);
+  for (const section of telecommsSections()) inspector.append(section);
   inspector.querySelector<HTMLButtonElement>('.close')!.onclick = clearSelection;
 }
 
@@ -417,6 +422,7 @@ export function inspect(
   z = state.z,
   result: SearchRecord | null = null,
   highlights?: number[],
+  telecomHighlights?: number[],
 ): void {
   const map = state.map;
   if (!map) return;
@@ -431,6 +437,12 @@ export function inspect(
   state.selected = { x, y, z };
   state.selectedArea = null;
   state.selectionDraft = null;
+  state.telecomHighlights = validTelecomHighlights(
+    map,
+    state.selected,
+    null,
+    telecomHighlights ?? (same ? state.telecomHighlights : []),
+  );
   if (!result) clearFinding();
   state.selectionPulseStart = performance.now();
   let shownResult: typeof inspectedResult = result;
@@ -520,6 +532,7 @@ function paintAreaInspector(area: AreaSelection): void {
       inspector.append(section);
     }
   }
+  for (const section of telecommsSections()) inspector.append(section);
   const transitions = (map.infrastructure?.transitions || []).filter(
     (t) => t.z === area.z && t.x >= area.x1 && t.x <= area.x2 && t.y >= area.y1 && t.y <= area.y2,
   );
@@ -531,7 +544,7 @@ function paintAreaInspector(area: AreaSelection): void {
   inspector.querySelector<HTMLButtonElement>('.close')!.onclick = clearSelection;
 }
 
-export function inspectArea(area: AreaSelection): void {
+export function inspectArea(area: AreaSelection, telecomHighlights?: number[]): void {
   const map = state.map;
   if (
     !map ||
@@ -548,6 +561,7 @@ export function inspectArea(area: AreaSelection): void {
   state.selectedArea = { ...area };
   state.selectionDraft = null;
   state.offsetHighlights.clear();
+  state.telecomHighlights = validTelecomHighlights(map, state.selected, area, telecomHighlights || []);
   clearFinding();
   inspectedResult = null;
   tileCandidates = [];

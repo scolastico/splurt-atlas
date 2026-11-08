@@ -26,6 +26,7 @@ import { buildRooms, buildSearchItems } from './spawn-records.mjs';
 import { createTileRenderer } from './tile-renderer.mjs';
 import { placeRoundstartShuttles } from './roundstart-shuttles.mjs';
 import { randomAppearances } from './random-appearances.mjs';
+import { collectTelecomms } from './telecomms.mjs';
 
 /** Per-cell appearances: expanded structures, smoothed neighbors, resolved random posters. */
 function buildAppearances(map, db) {
@@ -148,6 +149,7 @@ export async function runExportWorker() {
       jobRoles: doorAccess.roles,
       jobRoleSources: doorAccess.roleSources,
       doorControls: collectDoorControls(cells, dictionary, db),
+      telecomms: collectTelecomms(cells, dictionary, db, levels, station),
       infrastructure,
       definitions,
       files,

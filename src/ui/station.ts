@@ -90,8 +90,12 @@ function restoreView(map: MapMeta, params: URLSearchParams): void {
     .split(',')
     .filter((value) => /^\d+$/.test(value))
     .map(Number);
-  if (area) inspectArea(area);
-  else inspect(tile.x, tile.y, tile.z, null, highlights);
+  const telecomHighlights = (params.get('c') || '')
+    .split(',')
+    .filter((value) => /^\d+$/.test(value))
+    .map(Number);
+  if (area) inspectArea(area, telecomHighlights);
+  else inspect(tile.x, tile.y, tile.z, null, highlights, telecomHighlights);
 }
 
 function withTileMasks(level: LevelData): DeckLevel {
@@ -137,6 +141,7 @@ export async function loadStation(id: string, restore = false): Promise<void> {
   state.selected = null;
   state.selectedArea = null;
   state.selectionDraft = null;
+  state.telecomHighlights = new Set();
   clearImages();
   resetAnnotationCaches();
   $<HTMLButtonElement>('inspect-tab').disabled = true;
@@ -199,6 +204,7 @@ export function showMapPicker(): void {
   state.selected = null;
   state.selectedArea = null;
   state.selectionDraft = null;
+  state.telecomHighlights = new Set();
   showSidebarView('explore');
   state.generation++;
   loadAbort?.abort();

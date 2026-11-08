@@ -157,6 +157,29 @@ export interface DoorControl {
   atomIndex: number;
 }
 
+export interface TelecommsMachine {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  atomIndex: number;
+  path: string;
+  name: string;
+  machineId: string;
+  network: string;
+  autolinkers: (string | number)[];
+  frequencyMode: 'all' | 'filtered' | 'unknown';
+  frequencies: { value: number; name?: string }[];
+  longRange: boolean;
+  enabled: boolean;
+  broadcasting?: boolean;
+  receiving?: boolean;
+  compressing?: boolean;
+  changeFrequency?: number;
+  unresolved: string[];
+  links: number[];
+}
+
 export interface JobRoleSource {
   type: string;
   declarations: DoorAccessDeclaration[];
@@ -189,6 +212,7 @@ export interface MapMeta {
   jobRoles?: string[];
   jobRoleSources?: Record<string, JobRoleSource>;
   doorControls?: DoorControl[];
+  telecomms?: TelecommsMachine[];
   /** Repository paths of the map files this station was exported from. */
   files: string[];
 }
