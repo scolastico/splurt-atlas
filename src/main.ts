@@ -20,6 +20,7 @@ import { loadStation, showMapPicker } from './ui/station.ts';
 import { chooseStorage, initStorageSettings, warmStorage } from './ui/storage-settings.ts';
 import { currentHashParams, initOptionSharing, restoreOptions } from './ui/url-state.ts';
 import { initInfoPopovers } from './ui/info-popovers.ts';
+import { initMapContextMenu } from './ui/map-context-menu.ts';
 
 function initSourceLink(): void {
   const url = import.meta.env.VITE_ATLAS_SOURCE_URL;
@@ -129,6 +130,7 @@ initSearch(() => {
 initInspector();
 initHistory();
 initCameraControls();
+initMapContextMenu();
 initRender();
 initOptionSharing();
 initDisplayToggles();

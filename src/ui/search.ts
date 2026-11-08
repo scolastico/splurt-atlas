@@ -174,7 +174,8 @@ export function showFinding(id: string, index: number, tile: string | null): voi
 
 /** Asks the worker which random spawns are recorded on a tile; the inspector shows the reply. */
 export function requestTileCandidates(x: number, y: number, z: number): void {
-  if (state.searchReady) worker?.postMessage({ type: 'tile', tile: `${x},${y},${z}`, seq: ++tileSeq });
+  if (state.searchReady)
+    worker?.postMessage({ type: 'tile', tile: `${x},${y},${z}`, area: state.selectedArea, seq: ++tileSeq });
 }
 
 /** Resets the search panel while a station loads, keeping or restoring the query. */

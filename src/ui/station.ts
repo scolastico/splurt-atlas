@@ -11,7 +11,7 @@ import { redraw } from '../core/frame.ts';
 import { clearImages, setWarmImages } from '../rendering/images.ts';
 import { invalidateUtilityPaths } from '../rendering/infrastructure-overlay.ts';
 import { recordJump, resetHistory, withoutHistory } from './history.ts';
-import { clearSelection, inspect } from './inspector.ts';
+import { clearSelection, inspect, inspectArea } from './inspector.ts';
 import { showSidebarView } from './layout.ts';
 import { clearLoadingError, setLoading, showLoadingError } from './loading.ts';
 import {
@@ -25,7 +25,7 @@ import { state, TILE, type DeckLevel } from '../core/state.ts';
 import { updateStorageSizes, warmStorage } from './storage-settings.ts';
 import type { LevelData, MapMeta } from '../core/types.ts';
 import { currentHashParams, restoreOptions, share, shareOptionsOnly } from './url-state.ts';
-import { selectedTile } from '../model/view-state.ts';
+import { selectedTile, selectedArea, selectionCamera } from '../model/view-state.ts';
 import { decodeLevel, decodeMap } from '../../scripts/lib/map-format.mjs';
 import { updateNetworkSummary } from './infrastructure-controls.ts';
 
@@ -76,14 +76,16 @@ function restoreView(map: MapMeta, params: URLSearchParams): void {
     state.zoom = Math.max(0.04, Math.min(5, Number(params.get('s'))));
     redraw();
   }
-  const tile = selectedTile(params, map);
+  const area = selectedArea(params, map);
+  const tile = area ? { x: area.x1, y: area.y1, z: area.z } : selectedTile(params, map);
   if (!tile) return;
   // A link that names a tile but no view (as the in-game "View in Browser"
   // link does) opens centered on that tile.
-  if (!['x', 'y', 's'].some((key) => params.has(key))) {
-    state.x = (tile.x - 1) * TILE + TILE / 2;
-    state.y = (map.height - tile.y) * TILE + TILE / 2;
-    state.zoom = 1;
+  const centered = selectionCamera(params, map);
+  if (centered) {
+    state.x = centered.x;
+    state.y = centered.y;
+    state.zoom = centered.zoom;
     redraw();
   }
   if (state.z !== tile.z) setDeck(tile.z);
@@ -91,7 +93,8 @@ function restoreView(map: MapMeta, params: URLSearchParams): void {
     .split(',')
     .filter((value) => /^\d+$/.test(value))
     .map(Number);
-  inspect(tile.x, tile.y, tile.z, null, highlights);
+  if (area) inspectArea(area);
+  else inspect(tile.x, tile.y, tile.z, null, highlights);
 }
 
 function withTileMasks(level: LevelData): DeckLevel {
@@ -103,6 +106,7 @@ function withTileMasks(level: LevelData): DeckLevel {
 
 /** Loads a station; with `restore`, the view and selection come from the link. */
 export async function loadStation(id: string, restore = false): Promise<void> {
+  resetHistory();
   const generation = ++state.generation;
   assetCache.setCurrentMap(id);
   updateStorageSizes();
@@ -134,6 +138,8 @@ export async function loadStation(id: string, restore = false): Promise<void> {
   state.levels.clear();
   state.markers = [];
   state.selected = null;
+  state.selectedArea = null;
+  state.selectionDraft = null;
   clearImages();
   resetAnnotationCaches();
   $<HTMLButtonElement>('inspect-tab').disabled = true;
@@ -188,11 +194,14 @@ function previewPath(map: { id: string; preview?: string | null; naturalPreview?
 
 /** Shows the station cards and clears the current station. */
 export function showMapPicker(): void {
+  resetHistory();
   const manifest = state.manifest!;
   assetCache.activeView = false;
   disableSearch('Choose a station to search its rooms and items.');
   $<HTMLButtonElement>('inspect-tab').disabled = true;
   state.selected = null;
+  state.selectedArea = null;
+  state.selectionDraft = null;
   showSidebarView('explore');
   state.generation++;
   loadAbort?.abort();

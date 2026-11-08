@@ -70,8 +70,8 @@ function initPointerControls(): void {
   };
 
   mapCanvas.onpointerdown = (event) => {
-    // The mouse back and forward buttons never start a drag.
-    if (event.button === 3 || event.button === 4) return;
+    // Context-menu and history buttons never start a drag.
+    if (event.button !== 0 && event.button !== 1) return;
     tapCandidate = null;
     mapCanvas.focus();
     mapCanvas.setPointerCapture(event.pointerId);
@@ -106,6 +106,7 @@ function initPointerControls(): void {
     panBy(-(event.clientX - previous[0]) / state.zoom, -(event.clientY - previous[1]) / state.zoom);
   };
   mapCanvas.onpointerup = (event) => {
+    if (!pointers.has(event.pointerId)) return;
     pointers.delete(event.pointerId);
     if (!dragged && !pointers.size && state.map) {
       const [sx, sy] = canvasPoint(event);
@@ -251,21 +252,8 @@ function stopPanning(): void {
 }
 
 /** Mouse back and forward buttons step through the in-app history instead of the browser's. */
-function initHistoryButtons(): void {
-  document.addEventListener('mouseup', (event) => {
-    if (event.button === 3 || event.button === 4) event.preventDefault();
-  });
-  document.addEventListener('auxclick', (event) => {
-    if (event.button !== 3 && event.button !== 4) return;
-    event.preventDefault();
-    if (event.button === 3) goBack();
-    else goForward();
-  });
-}
-
 export function initCameraControls(): void {
   initPointerControls();
-  initHistoryButtons();
   $('zoom-in').onclick = () => zoomBy(1.5);
   $('zoom-out').onclick = () => zoomBy(1 / 1.5);
   $('fit').onclick = fit;

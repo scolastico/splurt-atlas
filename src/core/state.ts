@@ -2,7 +2,7 @@
 // the selection. Modules read and update it directly; `redraw()` in frame.ts
 // schedules the next paint after a change.
 import type { LevelData, Manifest, MapMeta, Network } from './types.ts';
-import type { TileRef } from '../model/view-state.ts';
+import type { AreaSelection, TileRef } from '../model/view-state.ts';
 import { DEFAULT_INFRASTRUCTURE_ORDER } from '../model/infrastructure-order.ts';
 
 /** A decoded deck plus a lookup of strip masks per zoom level, keyed "x,y". */
@@ -32,6 +32,8 @@ export interface ViewerState {
   /** Flat x, y, z triples of the current search finding, drawn as rings. */
   markers: number[];
   selected: TileRef | null;
+  selectedArea: AreaSelection | null;
+  selectionDraft: AreaSelection | null;
   /** Indices of offset-drawn objects on the selected tile that are highlighted. */
   offsetHighlights: Set<number>;
   /** When the selection pulse animation started. */
@@ -66,6 +68,8 @@ export const state: ViewerState = {
   loadingStation: false,
   markers: [],
   selected: null,
+  selectedArea: null,
+  selectionDraft: null,
   offsetHighlights: new Set(),
   selectionPulseStart: -Infinity,
   motion: true,

@@ -121,11 +121,27 @@ export function drawAnnotations(context: CanvasRenderingContext2D): void {
   if (state.selected?.z === state.z) {
     const elapsed = performance.now() - state.selectionPulseStart;
     const pulse = selectionPulsing() ? 0.5 + Math.sin(elapsed / 75) * 0.5 : 0;
-    const x = (state.selected.x - 1) * TILE;
-    const y = (map.height - state.selected.y) * TILE;
+    const area = state.selectedArea;
+    const x = ((area?.x1 ?? state.selected.x) - 1) * TILE;
+    const y = (map.height - (area?.y2 ?? state.selected.y)) * TILE;
+    const width = area ? (area.x2 - area.x1 + 1) * TILE : TILE;
+    const height = area ? (area.y2 - area.y1 + 1) * TILE : TILE;
     context.fillStyle = `rgba(255,210,115,${pulse * 0.3})`;
-    context.fillRect(x, y, TILE, TILE);
+    context.fillRect(x, y, width, height);
     context.strokeStyle = '#fff4d8';
-    context.strokeRect(x, y, TILE, TILE);
+    context.strokeRect(x, y, width, height);
+  }
+  const draft = state.selectionDraft;
+  if (draft?.z === state.z) {
+    const x = (draft.x1 - 1) * TILE,
+      y = (map.height - draft.y2) * TILE;
+    const width = (draft.x2 - draft.x1 + 1) * TILE,
+      height = (draft.y2 - draft.y1 + 1) * TILE;
+    context.fillStyle = 'rgba(106,224,255,0.18)';
+    context.strokeStyle = '#6ae0ff';
+    context.setLineDash([6 / state.zoom, 4 / state.zoom]);
+    context.fillRect(x, y, width, height);
+    context.strokeRect(x, y, width, height);
+    context.setLineDash([]);
   }
 }

@@ -3,6 +3,34 @@
 import { transitOverlays } from './transit-appearance.mjs';
 import { unquote } from './dm.mjs';
 
+/** Solar machinery creates raised panel/dish vis_contents during initialization. */
+export function solarOverlays(atom, db) {
+  if (!/^\/obj\/machinery\/power\/(solar|tracker)(?:\/|$)/.test(atom.path)) return [];
+  const vars = { ...db.resolve(atom.path), ...atom.vars };
+  const tracker = /^\/obj\/machinery\/power\/tracker(?:\/|$)/.test(atom.path);
+  const material = unquote(db.resolve(vars.material_type || '/datum/material/glass').name) || 'glass';
+  const panel = tracker ? 'tracker' : `solar_panel_${material}`;
+  return [
+    [`${panel}_edge`, 11],
+    [panel, 13],
+  ].flatMap(([state, height]) => {
+    if (db.hasIconState && !db.hasIconState(unquote(vars.icon), state)) return [];
+    return [
+      {
+        ...atom,
+        vars: {
+          ...atom.vars,
+          icon: vars.icon,
+          icon_state: JSON.stringify(state),
+          pixel_z: String(Number(vars.pixel_z || 0) + height),
+          layer: '5',
+          dir: '2',
+        },
+      },
+    ];
+  });
+}
+
 /** Fullbright fixtures still need their lit tube/bulb/floor overlay. */
 export function lightOverlays(atom, db) {
   if (!/^\/obj\/machinery\/light(?:\/|$)/.test(atom.path)) return [];
@@ -189,7 +217,13 @@ export function expandStructures(atoms, db, depth = 0) {
       const directions = { north: '1', south: '2', east: '4', west: '8' };
       return [{ path: parent, vars: { ...atom.vars, dir: directions[atom.path.split('/').at(-1)] || '2' } }];
     }
-    return [atom, ...transitOverlays(atom, db), ...closetOverlays(atom, db), ...lightOverlays(atom, db)];
+    return [
+      atom,
+      ...transitOverlays(atom, db),
+      ...closetOverlays(atom, db),
+      ...lightOverlays(atom, db),
+      ...solarOverlays(atom, db),
+    ];
   });
 }
 

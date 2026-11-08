@@ -372,7 +372,9 @@ export function buildInfrastructure(cells, at, db, levels) {
         transitions.push({ x: cell.x, y: cell.y, z: cell.z, kind: 'Stairs', targets });
         if (targets.length)
           transitions.push({
-            ...target,
+            x: cell.x,
+            y: cell.y,
+            z: target.z,
             kind: 'Stairs',
             targets: [{ x: cell.x, y: cell.y, z: cell.z, room: destination(cell.x, cell.y, cell.z) }],
           });

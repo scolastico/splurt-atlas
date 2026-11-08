@@ -5,6 +5,8 @@
 import { createSearchIndex, type SearchFilters, type SearchIndex } from '../model/search-index.ts';
 import { decodeSearch } from '../../scripts/lib/map-format.mjs';
 import type { Room, SearchItem } from '../core/types.ts';
+import type { AreaSelection } from '../model/view-state.ts';
+import { selectionTiles } from '../model/selection-data.ts';
 
 export type SearchWorkerRequest =
   | {
@@ -17,7 +19,7 @@ export type SearchWorkerRequest =
     }
   | ({ type: 'query'; seq: number; query: string } & SearchFilters)
   | { type: 'locations'; seq: number; id: string }
-  | { type: 'tile'; seq: number; tile: string };
+  | { type: 'tile'; seq: number; tile: string; area?: AreaSelection | null };
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 let index: SearchIndex | null = null;
@@ -46,5 +48,16 @@ scope.onmessage = async ({ data }: MessageEvent<SearchWorkerRequest>) => {
     scope.postMessage({ type: 'results', seq: data.seq, ...index.search(data.query, data) });
   if (data.type === 'locations')
     scope.postMessage({ type: 'locations', seq: data.seq, result: index.get(data.id) });
-  if (data.type === 'tile') scope.postMessage({ type: 'tile', seq: data.seq, possible: index.at(data.tile) });
+  if (data.type === 'tile') {
+    const possible = data.area
+      ? [
+          ...new Map(
+            selectionTiles(data.area)
+              .flatMap((tile) => index!.at(`${tile.x},${tile.y},${tile.z}`))
+              .map((item) => [JSON.stringify(item), item]),
+          ).values(),
+        ]
+      : index.at(data.tile);
+    scope.postMessage({ type: 'tile', seq: data.seq, possible });
+  }
 };

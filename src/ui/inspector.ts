@@ -20,6 +20,8 @@ import type {
 import { share } from './url-state.ts';
 import { viewFragment } from '../model/view-state.ts';
 import { randomPreviewMarkup } from '../model/random-preview.ts';
+import type { AreaSelection } from '../model/view-state.ts';
+import { selectionDefinitions } from '../model/selection-data.ts';
 
 /** The finding shown with the selection, if the selection came from a search result. */
 let inspectedResult: (SearchRecord & { spawner?: string }) | null = null;
@@ -62,6 +64,8 @@ function nameList(items: { name: string }[]): string {
 export function clearSelection(): void {
   clearFinding();
   state.selected = null;
+  state.selectedArea = null;
+  state.selectionDraft = null;
   state.offsetHighlights = new Set();
   $<HTMLButtonElement>('inspect-tab').disabled = true;
   showSidebarView('explore');
@@ -225,6 +229,7 @@ function controlLink(control: DoorControl): HTMLAnchorElement {
     y: (map.height - control.y + 0.5) * 32,
     zoom: Math.max(state.zoom, 1),
     selected: control,
+    selectedArea: null,
     result: null,
     finding: null,
     offsetHighlights: new Set([control.atomIndex]),
@@ -365,6 +370,10 @@ function offsetObjectsSection(definition: Definition): HTMLElement | null {
 /** Re-renders the inspector panel for the current selection and view mode. */
 export function paintInspector(): void {
   if (!state.selected || !state.map) return;
+  if (state.selectedArea) {
+    paintAreaInspector(state.selectedArea);
+    return;
+  }
   const { x, y, z } = state.selected;
   const definition = definitionAt(x, y, z);
   if (!definition) return;
@@ -420,6 +429,8 @@ export function inspect(
     );
   else if (!same) state.offsetHighlights = new Set();
   state.selected = { x, y, z };
+  state.selectedArea = null;
+  state.selectionDraft = null;
   if (!result) clearFinding();
   state.selectionPulseStart = performance.now();
   let shownResult: typeof inspectedResult = result;
@@ -459,4 +470,94 @@ export function inspect(
 
 export function initInspector(): void {
   $('detailed-view').onchange = paintInspector;
+}
+
+function paintAreaInspector(area: AreaSelection): void {
+  const map = state.map!;
+  const detailed = isChecked('detailed-view');
+  const groups = selectionDefinitions(area, definitionAt);
+  const count = (area.x2 - area.x1 + 1) * (area.y2 - area.y1 + 1);
+  const rooms = new Map<number, number>();
+  const objects = new Map<string, { atom: Atom; count: number }>();
+  for (const group of groups) {
+    rooms.set(group.definition.area, (rooms.get(group.definition.area) || 0) + group.tiles.length);
+    for (const atom of group.definition.atoms) {
+      const key = JSON.stringify(atom);
+      if (!objects.has(key)) objects.set(key, { atom, count: 0 });
+      objects.get(key)!.count += group.tiles.length;
+    }
+  }
+  const inspector = $('inspector');
+  inspector.innerHTML = `<button class="close" aria-label="Close inspector">&times;</button>
+    <span class="tiny-label">AREA INSPECTOR / Z${area.z}</span><h3>${count} selected tiles</h3>
+    <p>X ${area.x1}–${area.x2} / Y ${area.y1}–${area.y2}</p>
+    <h4 class="info-heading">Rooms</h4><ul>${[...rooms].map(([id, count]) => `<li>${escapeHtml(map.areas[id].name)} (${count} tiles)</li>`).join('')}</ul>
+    <h4 class="info-heading">Surfaces and mapped objects</h4>
+    <ul>${[...objects.values()]
+      .sort((a, b) => a.atom.name.localeCompare(b.atom.name))
+      .map(
+        ({ atom, count }) =>
+          `<li>${escapeHtml(atom.name)} &times; ${count}${detailed ? `<details><summary>Type &amp; overrides</summary><code>${escapeHtml(atom.path)}</code><pre>${escapeHtml(JSON.stringify(atom.vars, null, 2))}</pre>${atom.source ? sourceLink(atom.source) : ''}</details>` : atom.description ? `<p>${escapeHtml(cleanText(atom.description))}</p>` : ''}</li>`,
+      )
+      .join('')}</ul>
+    ${randomPreviewMarkup(
+      [...objects.values()].map(({ atom }) => atom),
+      isChecked('random-markers'),
+    )}
+    <h4 class="info-heading">Possible contents (${tileCandidates.length})</h4>
+    <ul>${tileCandidates.map((item) => `<li>${escapeHtml(item.name)}${detailed ? `<br><code>${escapeHtml(item.path)}</code>` : ''}</li>`).join('')}</ul>
+    <p class="helper-text">Possible contents are candidates, not guaranteed inventory.</p>
+    <details><summary>All selected tile data</summary>${groups.map(({ definition, tiles }) => `<details><summary>${tiles.length} tiles: ${escapeHtml(definition.turf)}</summary><p>${tiles.map((t) => `${t.x},${t.y}`).join('; ')}</p><pre>${escapeHtml(JSON.stringify(definition, null, 2))}</pre></details>`).join('')}</details>`;
+  for (const { definition, tiles } of groups) {
+    const tile = tiles[0];
+    for (const door of definition.atoms.filter(
+      (atom): atom is Atom & { doorAccess: DoorAccess } => !!atom.doorAccess,
+    )) {
+      const section = doorSection(door, tile.x, tile.y, tile.z, detailed);
+      const locations = document.createElement('p');
+      locations.textContent = `Locations: ${tiles.map((t) => `${t.x},${t.y}`).join('; ')}`;
+      section.prepend(locations);
+      inspector.append(section);
+    }
+  }
+  const transitions = (map.infrastructure?.transitions || []).filter(
+    (t) => t.z === area.z && t.x >= area.x1 && t.x <= area.x2 && t.y >= area.y1 && t.y <= area.y2,
+  );
+  if (transitions.length)
+    inspector.insertAdjacentHTML(
+      'beforeend',
+      `<h4 class="info-heading">Deck connections</h4><ul>${transitions.map((t) => `<li>${escapeHtml(t.kind)} at ${t.x},${t.y}: ${t.targets.map((target) => `Deck ${target.z} (${escapeHtml(target.room)})`).join('; ')}</li>`).join('')}</ul>`,
+    );
+  inspector.querySelector<HTMLButtonElement>('.close')!.onclick = clearSelection;
+}
+
+export function inspectArea(area: AreaSelection): void {
+  const map = state.map;
+  if (
+    !map ||
+    area.x1 < 1 ||
+    area.y1 < 1 ||
+    area.x2 > map.width ||
+    area.y2 > map.height ||
+    area.x1 > area.x2 ||
+    area.y1 > area.y2 ||
+    !map.levels.includes(area.z)
+  )
+    return;
+  state.selected = { x: area.x1, y: area.y1, z: area.z };
+  state.selectedArea = { ...area };
+  state.selectionDraft = null;
+  state.offsetHighlights.clear();
+  clearFinding();
+  inspectedResult = null;
+  tileCandidates = [];
+  state.selectionPulseStart = performance.now();
+  $<HTMLButtonElement>('inspect-tab').disabled = false;
+  setSidebarCollapsed(false);
+  showSidebarView('inspect');
+  paintInspector();
+  requestTileCandidates(area.x1, area.y1, area.z);
+  redraw();
+  share();
+  recordJump();
 }

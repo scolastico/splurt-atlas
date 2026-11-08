@@ -25,6 +25,34 @@ export interface TileRef {
   z: number;
 }
 
+export interface AreaSelection {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  z: number;
+}
+
+export function selectionBounds(a: TileRef, b: TileRef): AreaSelection {
+  return {
+    x1: Math.min(a.x, b.x),
+    y1: Math.min(a.y, b.y),
+    x2: Math.max(a.x, b.x),
+    y2: Math.max(a.y, b.y),
+    z: a.z,
+  };
+}
+
+/** Rectangle coordinates are inclusive, on one deck, and must fit the map. */
+export function selectedArea(params: URLSearchParams, map: MapMeta): AreaSelection | null {
+  const raw = params.get('a');
+  if (!raw || !/^\d+,\d+,\d+,\d+,\d+$/.test(raw)) return null;
+  const [x1, y1, x2, y2, z] = raw.split(',').map(Number);
+  if (x1 < 1 || y1 < 1 || x2 < x1 || y2 < y1 || x2 > map.width || y2 > map.height || !map.levels.includes(z))
+    return null;
+  return { x1, y1, x2, y2, z };
+}
+
 /** The `t=x,y,z` parameter of a link, validated against the map. */
 export function selectedTile(params: URLSearchParams, map: MapMeta): TileRef | null {
   const raw = params.get('t');
@@ -32,6 +60,21 @@ export function selectedTile(params: URLSearchParams, map: MapMeta): TileRef | n
   const [x, y, z] = raw.split(',').map(Number) as [number, number, number];
   const inside = x >= 1 && x <= map.width && y >= 1 && y <= map.height && map.levels.includes(z);
   return inside ? { x, y, z } : null;
+}
+
+/** Tile/area-only links supply their own deck and center, with optional zoom. */
+export function selectionCamera(params: URLSearchParams, map: MapMeta) {
+  if (params.has('x') || params.has('y')) return null;
+  const area = selectedArea(params, map);
+  const tile = selectedTile(params, map);
+  if (!area && !tile) return null;
+  const x = area ? (area.x1 + area.x2) / 2 : tile!.x;
+  const y = area ? (area.y1 + area.y2) / 2 : tile!.y;
+  const zoom =
+    params.has('s') && Number.isFinite(Number(params.get('s')))
+      ? Math.max(0.04, Math.min(5, Number(params.get('s'))))
+      : 1;
+  return { x: (x - 0.5) * 32, y: (map.height - y + 0.5) * 32, z: area?.z ?? tile!.z, zoom };
 }
 
 /** Bit of each sidebar option in the `o=` link parameter. Order is part of the link format. */
@@ -86,6 +129,7 @@ export interface ShareableView {
   y: number;
   zoom: number;
   selected?: TileRef | null;
+  selectedArea?: AreaSelection | null;
   query?: string;
   result?: string | null;
   finding?: number | null;
@@ -105,6 +149,10 @@ export function viewFragment(view: ShareableView): string {
     s: String(Number(view.zoom.toFixed(3))),
   });
   if (view.selected) params.set('t', `${view.selected.x},${view.selected.y},${view.selected.z}`);
+  if (view.selectedArea) {
+    const a = view.selectedArea;
+    params.set('a', `${a.x1},${a.y1},${a.x2},${a.y2},${a.z}`);
+  }
   if (view.query) params.set('q', view.query);
   if (view.result) {
     params.set('r', view.result);
