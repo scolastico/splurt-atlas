@@ -9,6 +9,7 @@ import { definitionAt, state } from '../core/state.ts';
 import { setDeck } from './station.ts';
 import type { MapMeta, SearchHit, SearchRecord, TileCandidate } from '../core/types.ts';
 import { share } from './url-state.ts';
+import { placedFindingKeys } from '../model/search-markers.ts';
 
 const FINDINGS_PER_PAGE = 30;
 const SEARCH_DEBOUNCE_MS = 130;
@@ -79,7 +80,7 @@ function showResults(data: { total: number; results: SearchHit[] }): void {
     button.className = 'result';
     button.disabled = state.loadingStation;
     const unit = result.kind === 'room' ? 'decks' : 'locations';
-    button.innerHTML = `${escapeHtml(result.name)}<small>${escapeHtml((result.kinds?.join(' + ') || result.kind).toUpperCase())} · ${result.count} ${unit}</small>`;
+    button.innerHTML = `${escapeHtml(result.name)}<small>${kindMarkup(result)} · ${result.count} ${unit}</small>`;
     button.onclick = () => {
       locationTarget = null;
       worker?.postMessage({ type: 'locations', id: result.id, seq: ++locationSeq });
@@ -97,6 +98,7 @@ export function selectFinding(index: number, { focus = true } = {}): void {
   setDeck(z);
   finding = result;
   state.markers = result.points;
+  state.placedMarkers = placedFindingKeys(result);
   findingIndex = index;
   findingPage = Math.floor(index / FINDINGS_PER_PAGE);
   state.result = result.id;
@@ -122,7 +124,7 @@ function showFindings(): void {
   const end = Math.min(finding.count, start + FINDINGS_PER_PAGE);
   panel.innerHTML = `<button class="back-to-search">← Search results</button>
 <h2>${escapeHtml(finding.name)}</h2>
-<p>${escapeHtml((finding.kinds?.join(' + ') || finding.kind).toUpperCase())} · ${finding.count} findings</p>
+<p>${kindMarkup(finding)} · ${finding.count} findings</p>
 <div class="finding-list"></div>
 <div class="finding-pages">
 <button class="previous" ${start === 0 ? 'disabled' : ''} aria-label="Previous findings">←</button>
@@ -136,9 +138,12 @@ function showFindings(): void {
     const button = document.createElement('button');
     button.className = 'finding-location';
     button.dataset.index = String(index);
+    const kind =
+      finding.kind === 'room' ? 'room' : state.placedMarkers.has(`${x},${y},${z}`) ? 'placed' : 'possible';
+    button.dataset.kind = kind;
     button.setAttribute('aria-pressed', String(index === findingIndex));
     const area = definition ? state.map!.areas[definition.area].name : 'Unknown area';
-    button.innerHTML = `<span>${index + 1}. ${escapeHtml(area)}</span><small>Z${z} · X ${x} / Y ${y}</small>`;
+    button.innerHTML = `<span>${index + 1}. ${escapeHtml(area)}</span><small>${kind !== 'room' ? `${kind.toUpperCase()} · ` : ''}Z${z} · X ${x} / Y ${y}</small>`;
     button.onclick = () => selectFinding(index);
     list.append(button);
   }
@@ -160,9 +165,19 @@ export function clearFinding(): void {
   locationTarget = null;
   locationSeq++;
   state.markers = [];
+  state.placedMarkers = new Set();
   state.result = null;
   state.finding = null;
   $('search-findings').hidden = true;
+}
+
+function kindMarkup(result: Pick<SearchRecord, 'kind' | 'kinds'>): string {
+  return (result.kinds || [result.kind])
+    .map(
+      (kind) =>
+        `<span class="search-provenance" data-kind="${escapeHtml(kind)}">${escapeHtml(kind.toUpperCase())}</span>`,
+    )
+    .join(' + ');
 }
 
 /** Shows a finding of a search record again, as the in-app history does. */

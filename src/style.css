@@ -1604,3 +1604,17 @@ body.resizing #map-picker {
   flex: 1;
   color: #8ed5ec;
 }
+.search-provenance[data-kind='placed'],
+.finding-location[data-kind='placed'] small {
+  color: #5ae290;
+}
+.search-provenance[data-kind='possible'],
+.finding-location[data-kind='possible'] small {
+  color: #ffcf72;
+}
+.finding-location[data-kind='placed'] {
+  border-left: 3px solid #5ae290;
+}
+.finding-location[data-kind='possible'] {
+  border-left: 3px solid #ffcf72;
+}

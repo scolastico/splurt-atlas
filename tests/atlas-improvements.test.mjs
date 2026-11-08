@@ -6,6 +6,7 @@ import { closetOverlays, randomiseTrash } from '../scripts/lib/appearance.mjs';
 import { closetCandidates, tileLoot } from '../scripts/lib/spawn-records.mjs';
 import { createTileRenderer } from '../scripts/lib/tile-renderer.mjs';
 import { utilityExposed } from '../scripts/lib/utility-visibility.mjs';
+import { placedFindingKeys } from '../src/model/search-markers.ts';
 
 test('search merges same-name variants with all locations and ranks literal names before fuzzy/path matches', () => {
   const item = (name, path, points = [1, 2, 1]) => ({ name, path, points, kind: 'placed' });
@@ -59,8 +60,13 @@ test('search combines placed and possible entries without losing filtered locati
   assert.equal(result.results[0].count, 3);
   const record = index.get(result.results[0].id);
   assert.deepEqual(record.placedPoints, [1, 2, 1]);
+  assert.deepEqual([...placedFindingKeys(record)], ['1,2,1']);
   assert.deepEqual(record.points, [1, 2, 1, 3, 4, 1, 5, 6, 1]);
   assert.equal(index.search('wrench', { placed: true, possible: false }).results[0].count, 1);
+  const onlyPlaced = index.get(index.search('wrench', { placed: true, possible: false }).results[0].id);
+  assert.deepEqual([...placedFindingKeys(onlyPlaced)], ['1,2,1']);
+  const onlyPossible = index.get(index.search('wrench', { placed: false, possible: true }).results[0].id);
+  assert.deepEqual([...placedFindingKeys(onlyPossible)], []);
   assert.equal(index.search('wrench', { placed: false, possible: true }).results[0].count, 3);
   assert.deepEqual(index.at('5,6,1'), [{ name: 'wrench', path: `${path}/variant` }]);
 });

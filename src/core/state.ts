@@ -31,6 +31,7 @@ export interface ViewerState {
   loadingStation: boolean;
   /** Flat x, y, z triples of the current search finding, drawn as rings. */
   markers: number[];
+  placedMarkers: Set<string>;
   selected: TileRef | null;
   selectedArea: AreaSelection | null;
   selectionDraft: AreaSelection | null;
@@ -68,6 +69,7 @@ export const state: ViewerState = {
   ready: false,
   loadingStation: false,
   markers: [],
+  placedMarkers: new Set(),
   selected: null,
   selectedArea: null,
   selectionDraft: null,

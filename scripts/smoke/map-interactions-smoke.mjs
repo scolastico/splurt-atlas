@@ -313,6 +313,73 @@ try {
   assert.deepEqual(bounded.edge, { x: 384, y: -64 });
   assert.equal(bounded.zoom, 0.04);
   assert.ok(bounded.x <= 320 + 64 / 0.04 && bounded.y >= -64 / 0.04);
+  await page.evaluate(async () => {
+    const { startSearchWorker, showFinding } = await import('/src/ui/search.ts');
+    const { state } = window.fixture;
+    const record = {
+      id: 'mixed',
+      kind: 'placed',
+      kinds: ['placed', 'possible'],
+      name: 'Fixture wrench',
+      path: '/obj/item/wrench',
+      spawners: [],
+      placedPoints: [2, 2, 1],
+      points: [2, 2, 1, 3, 3, 1],
+      count: 2,
+    };
+    const OriginalWorker = window.Worker;
+    window.Worker = class {
+      terminate() {}
+      postMessage(request) {
+        const response =
+          request.type === 'init'
+            ? { type: 'ready' }
+            : request.type === 'locations'
+              ? { type: 'locations', seq: request.seq, result: record }
+              : request.type === 'tile'
+                ? { type: 'tile', seq: request.seq, possible: [] }
+                : null;
+        if (response) queueMicrotask(() => this.onmessage({ data: response }));
+      }
+    };
+    try {
+      const { indexReady } = startSearchWorker(state.generation, state.map, new ArrayBuffer(0), null);
+      await indexReady;
+      showFinding('mixed', 0, null);
+      await new Promise(requestAnimationFrame);
+    } finally {
+      window.Worker = OriginalWorker;
+    }
+  });
+  assert.equal(await page.locator('.finding-location[data-kind="placed"]').count(), 1);
+  assert.equal(await page.locator('.finding-location[data-kind="possible"]').count(), 1);
+  assert.match(await page.locator('.finding-location[data-kind="placed"]').textContent(), /PLACED/);
+  assert.match(await page.locator('.finding-location[data-kind="possible"]').textContent(), /POSSIBLE/);
+  const markerColors = await page.evaluate(async () => {
+    const { state } = window.fixture;
+    const { highlightContext } = await import('/src/rendering/canvases.ts');
+    const { updateHighlightOverlay } = await import('/src/rendering/highlight-overlay.ts');
+    const { clearFinding } = await import('/src/ui/search.ts');
+    document.querySelector('#connections').checked = false;
+    document.querySelector('#connection-labels').checked = false;
+    state.x = 160;
+    state.y = 160;
+    state.zoom = 1;
+    const colors = [],
+      stroke = highlightContext.stroke;
+    highlightContext.stroke = function (...args) {
+      colors.push(this.strokeStyle.replaceAll(' ', ''));
+      return stroke.apply(this, args);
+    };
+    updateHighlightOverlay();
+    highlightContext.stroke = stroke;
+    clearFinding();
+    updateHighlightOverlay();
+    if (state.placedMarkers.size) throw new Error('Placed marker state was not cleared');
+    return colors;
+  });
+  assert.ok(markerColors.some((color) => color.startsWith('rgba(90,226,144,')));
+  assert.ok(markerColors.some((color) => color.startsWith('rgba(255,207,114,')));
   assert.deepEqual(errors, []);
   console.log(
     'Passed context clipboard actions, centered tile URLs, area selection/sharing/debug JSON, cancellation and mouse history boundaries.',

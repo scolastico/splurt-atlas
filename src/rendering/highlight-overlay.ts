@@ -20,6 +20,7 @@ const OVERLAY_FPS = 30;
 const PULSE_PERIOD_MS = 1800;
 const DOOR_COLORS = { allowed: '90,226,144', partial: '255,210,92', denied: '255,105,113' } as const;
 const FINDING_COLOR = '255,207,114';
+const PLACED_FINDING_COLOR = '90,226,144';
 
 let animationFrame = 0;
 let lastPaintTime = 0;
@@ -74,8 +75,12 @@ function drawHighlights(time = performance.now()): boolean {
     target.stroke();
   };
   for (const marker of getDoorMarkers()) ring(marker.x, marker.y, marker.z, DOOR_COLORS[marker.status]);
-  for (let index = 0; index < state.markers.length; index += 3)
-    ring(state.markers[index], state.markers[index + 1], state.markers[index + 2], FINDING_COLOR);
+  for (let index = 0; index < state.markers.length; index += 3) {
+    const x = state.markers[index],
+      y = state.markers[index + 1],
+      z = state.markers[index + 2];
+    ring(x, y, z, state.placedMarkers.has(`${x},${y},${z}`) ? PLACED_FINDING_COLOR : FINDING_COLOR);
+  }
 
   if (state.selected?.z === state.z && state.telecomHighlights.size) {
     const sources = selectedTelecomms(map, state.selected, state.selectedArea);

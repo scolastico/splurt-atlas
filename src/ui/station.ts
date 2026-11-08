@@ -138,6 +138,7 @@ export async function loadStation(id: string, restore = false): Promise<void> {
   state.map = null;
   state.levels.clear();
   state.markers = [];
+  state.placedMarkers = new Set();
   state.selected = null;
   state.selectedArea = null;
   state.selectionDraft = null;
