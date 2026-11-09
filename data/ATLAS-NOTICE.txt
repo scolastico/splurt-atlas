@@ -1,0 +1,17 @@
+S.P.L.U.R.T. Station Atlas
+
+Atlas application and conversion scripts: AGPL-3.0-or-later; see LICENSE.
+Upstream project: https://github.com/SPLURT-Station/S.P.L.U.R.T-tg
+Maps, game code and sprites belong to their respective upstream contributors.
+
+Generated assets retain their upstream licenses. They are not relicensed under
+the Atlas application license. Upstream states that assets are CC BY-SA 3.0
+unless otherwise indicated, and also accepts explicitly marked CC BY-NC-SA
+assets. Preserve and consult individual notices before reuse, especially
+commercial reuse. Older game code and bundled subprojects have separate terms.
+
+Every export includes the upstream README and full license, an exact commit
+hash, source map paths and an inventory of referenced icon files. Attribution
+and source links remain available in the viewer. The upstream commit history
+provides individual authorship details. Consult data/UPSTREAM-README.md and
+data/asset-sources.json in a built site.

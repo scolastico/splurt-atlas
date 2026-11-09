@@ -1,0 +1,116 @@
+{
+  "commit": "58cd83015ba7a528c87ad4c894785caa6e655265",
+  "baseline": "ee1204bbae3b72e485efef5516a1141d4b6aa962",
+  "changedFiles": [
+    "_maps/map_files/CardinalStation/CardinalStation.dmm",
+    "html/changelogs/splurt_archive/2026-11.yml"
+  ],
+  "rebuilt": [
+    "biodome",
+    "blueshift",
+    "boxstation",
+    "cardinalstation",
+    "catwalkstation",
+    "deltastation",
+    "icebox",
+    "kilostation",
+    "metastation",
+    "moonstation",
+    "nebulastation",
+    "northstar",
+    "ouroboros",
+    "pubbystation",
+    "tramstation",
+    "voidraptor"
+  ],
+  "reused": [],
+  "forced": false,
+  "workers": 4,
+  "sprites": {
+    "requested": 37019,
+    "missingIcon": 0,
+    "missingState": 28,
+    "samples": [
+      {
+        "icon": "icons/obj/service/library.dmi",
+        "state": "biochure"
+      },
+      {
+        "icon": "icons/obj/machines/turret_control.dmi",
+        "state": "control_stun"
+      },
+      {
+        "icon": "icons/obj/service/library.dmi",
+        "state": "biochure"
+      },
+      {
+        "icon": "icons/obj/service/library.dmi",
+        "state": "biochure"
+      },
+      {
+        "icon": "icons/effects/blood.dmi",
+        "state": "floor7-old"
+      },
+      {
+        "icon": "icons/effects/blood.dmi",
+        "state": "floor3-old"
+      },
+      {
+        "icon": "modular_skyrat/master_files/icons/obj/clothing/suits.dmi",
+        "state": "/obj/item/clothing/suit/croptop"
+      },
+      {
+        "icon": "icons/obj/clothing/suits/jacket.dmi",
+        "state": "detective"
+      },
+      {
+        "icon": "modular_skyrat/master_files/icons/obj/clothing/suits.dmi",
+        "state": "/obj/item/clothing/suit/croptop"
+      },
+      {
+        "icon": "icons/effects/blood.dmi",
+        "state": "floor5-old"
+      },
+      {
+        "icon": "icons/effects/blood.dmi",
+        "state": "floor4-old"
+      },
+      {
+        "icon": "icons/effects/blood.dmi",
+        "state": "floor2-old"
+      },
+      {
+        "icon": "icons/effects/blood.dmi",
+        "state": "floor4-old"
+      },
+      {
+        "icon": "icons/effects/blood.dmi",
+        "state": "floor2-old"
+      },
+      {
+        "icon": "icons/effects/blood.dmi",
+        "state": "floor3-old"
+      },
+      {
+        "icon": "icons/effects/blood.dmi",
+        "state": "floor6-old"
+      },
+      {
+        "icon": "icons/mob/simple/simple_human.dmi",
+        "state": "cat_butcher"
+      },
+      {
+        "icon": "modular_zubbers/icons/obj/service/advertisements.dmi",
+        "state": "null"
+      },
+      {
+        "icon": "modular_zubbers/icons/obj/service/advertisements.dmi",
+        "state": "null"
+      },
+      {
+        "icon": "modular_skyrat/modules/modular_weapons/icons/obj/company_and_or_faction_based/carwo_defense_systems/guns48x.dmi",
+        "state": "shotgun"
+      }
+    ]
+  }
+}
