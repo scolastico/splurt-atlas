@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, mkdirSync, cpSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdirSync, cpSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 export function copyPublic(out) {
   const publicRoot = path.resolve('public'),
@@ -8,7 +8,8 @@ export function copyPublic(out) {
   if (selected !== dataRoot && !selected.startsWith(dataRoot + path.sep))
     throw new Error('Invalid snapshot path');
   mkdirSync(out, { recursive: true });
-  for (const name of readdirSync(publicRoot))
+  // CLI builds supply data from staging; a clean checkout may have no public/.
+  for (const name of existsSync(publicRoot) ? readdirSync(publicRoot) : [])
     if (name !== 'data') cpSync(path.join(publicRoot, name), path.join(out, name), { recursive: true });
   const destination = path.join(out, 'data');
   mkdirSync(destination, { recursive: true });
