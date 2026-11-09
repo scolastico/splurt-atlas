@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { splitTop } from './dmm.mjs';
 import { expandTypeMacros } from './type-macros.mjs';
@@ -17,7 +17,17 @@ export function stripComments(text) {
   );
 }
 
-export function loadTypes(root) {
+export function loadTypes(root, entrypoint = process.env.ATLAS_DME) {
+  if (!entrypoint) {
+    const projects = readdirSync(root).filter((file) => /\.dme$/i.test(file));
+    entrypoint = projects.includes('tgstation.dme')
+      ? 'tgstation.dme'
+      : projects.length === 1
+        ? projects[0]
+        : null;
+  }
+  if (!entrypoint || !existsSync(path.join(root, entrypoint)))
+    throw new Error('Cannot determine the DM project; specify --dme with a source-relative .dme path');
   const types = new Map(),
     seen = new Set(),
     files = [],
@@ -39,7 +49,7 @@ export function loadTypes(root) {
     if (/\.dm$/i.test(file)) files.push([file, text]);
     for (const m of text.matchAll(/^\s*#include\s+"([^"]+\.(?:dm|dme))"/gm)) include(m[1]);
   }
-  include('tgstation.dme');
+  include(entrypoint);
   for (const [, text] of files)
     for (const m of text.matchAll(/^\s*#define\s+(\w+)\s+([^\n]+)/gm)) constants.set(m[1], m[2].trim());
   function literal(value, seen = new Set()) {

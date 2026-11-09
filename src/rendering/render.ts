@@ -1,4 +1,5 @@
 // The frame: station decks on the WebGL canvas, then the annotation layer.
+import { comparisonInset, paintComparison } from './comparison.ts';
 import { drawAnnotations, selectionPulsing } from './annotations.ts';
 import { annotationCanvas, annotationContext, highlightCanvas, mapCanvas, renderer } from './canvases.ts';
 import { assetCache } from '../data/source.ts';
@@ -49,6 +50,7 @@ function render(): void {
 }
 
 function paintFrame(): void {
+  comparisonInset();
   constrainCamera();
   if (isSidebarAnimating()) redraw();
   const detail = String(detailForZoom(state.zoom));
@@ -75,6 +77,7 @@ function paintFrame(): void {
     drawDeck(state.z, 0);
   }
   renderer.end();
+  paintComparison();
   const wantAnnotations = drawable && (state.regions || state.selected?.z === state.z);
   if (wantAnnotations || annotationsPainted) {
     annotationContext.setTransform(1, 0, 0, 1, 0, 0);
@@ -113,6 +116,7 @@ export function initRender(): void {
   setFramePainter(render);
   new ResizeObserver(resize).observe(mapCanvas);
   document.addEventListener('visibilitychange', () => {
+    redraw();
     updateSpaceAnimation();
     updateHighlightOverlay();
   });

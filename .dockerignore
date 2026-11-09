@@ -1,0 +1,8 @@
+node_modules
+.git
+.source
+.cache
+public/data
+dist
+test-results
+playwright-report

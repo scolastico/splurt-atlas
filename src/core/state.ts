@@ -11,6 +11,10 @@ export interface DeckLevel extends LevelData {
 }
 
 export interface ViewerState {
+  current?: string;
+  old?: string;
+  /** Union of both revisions, expressed from the current map's world origin. */
+  comparisonBounds?: { width: number; height: number; offsetY: number };
   manifest: Manifest | null;
   map: MapMeta | null;
   levels: Map<number, DeckLevel>;
@@ -31,6 +35,7 @@ export interface ViewerState {
   loadingStation: boolean;
   /** Flat x, y, z triples of the current search finding, drawn as rings. */
   markers: number[];
+  changedTiles: { x: number; y: number; z: number; kind: string }[];
   placedMarkers: Set<string>;
   selected: TileRef | null;
   selectedArea: AreaSelection | null;
@@ -69,6 +74,7 @@ export const state: ViewerState = {
   ready: false,
   loadingStation: false,
   markers: [],
+  changedTiles: [],
   placedMarkers: new Set(),
   selected: null,
   selectedArea: null,
@@ -119,7 +125,7 @@ export const infrastructureOrder = [...DEFAULT_INFRASTRUCTURE_ORDER];
 /** The definition under a tile, if the deck is loaded and the tile is inside the map. */
 export function definitionAt(x: number, y: number, z: number) {
   const map = state.map;
-  if (!map) return undefined;
+  if (!map || x < 1 || y < 1 || x > map.width || y > map.height) return undefined;
   const level = state.levels.get(z);
   if (!level) return undefined;
   return map.definitions[level.grid[(map.height - y) * map.width + x - 1]];

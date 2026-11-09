@@ -81,11 +81,13 @@ export function reuseMap(baseline, map, destination, { links = process.env.ATLAS
 export function canQuickReuse(baseline, map, converter, changed, renderConfig) {
   return !!(
     baseline &&
+    !baseline.manifest.dirty &&
     map?.fingerprint &&
     map.inputs?.length &&
     baseline.manifest.converter === converter &&
     baseline.manifest.tilePixels === renderConfig.tilePixels &&
     baseline.manifest.chunkTiles === renderConfig.chunkTiles &&
+    baseline.manifest.dme === renderConfig.dme &&
     changed &&
     !changed.some((file) => /\.(dm|dme)$/i.test(file) || map.inputs.includes(file))
   );

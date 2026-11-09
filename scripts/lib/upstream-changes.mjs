@@ -8,17 +8,26 @@ import { execFileSync } from 'node:child_process';
  */
 export function changedFilesSince(root, previousCommit, commit) {
   try {
+    const args = ['-c', `safe.directory=${root}`];
+    const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
     if (!/^[a-f0-9]{40}$/.test(previousCommit)) throw new Error('Invalid baseline revision');
     try {
-      execFileSync('git', ['cat-file', '-e', `${previousCommit}^{commit}`], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', [...args, 'cat-file', '-e', `${previousCommit}^{commit}`], {
+        cwd: root,
+        env,
+        stdio: 'ignore',
+      });
     } catch {
+      if (process.env.ATLAS_SOURCE_ROOT)
+        throw new Error('Baseline commit is absent from the read-only source checkout');
       execFileSync('git', ['fetch', '--depth=1', 'origin', previousCommit], { cwd: root, stdio: 'inherit' });
     }
     const changed = execFileSync(
       'git',
-      ['diff', '--no-renames', '--name-only', '-z', previousCommit, commit],
+      [...args, 'diff', '--no-renames', '--name-only', '-z', previousCommit, commit],
       {
         cwd: root,
+        env,
         encoding: 'utf8',
         maxBuffer: 16 * 1024 * 1024,
       },

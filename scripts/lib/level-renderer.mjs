@@ -3,15 +3,10 @@
 // JSON index.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import sharp from 'sharp';
-import { buildPyramid, writeStrip } from './image-pyramid.mjs';
-import {
-  CHANNELS,
-  OVERVIEW_TERRAIN,
-  channelMask,
-  encodeLevel,
-  levelBounds,
-  stripName,
-} from './map-format.mjs';
+import { renderChunk } from './chunk-renderer.mjs';
+import { mapConcurrent } from './render-pool.mjs';
+import { buildPyramid } from './image-pyramid.mjs';
+import { CHANNELS, OVERVIEW_TERRAIN, channelMask, encodeLevel, levelBounds } from './map-format.mjs';
 
 /** Overview strips hold 4×4 pixels per tile. */
 const OVERVIEW_PIXELS = 4;
@@ -43,29 +38,6 @@ function assignChunks(levelCells, { width, height, tilePixels: S, chunkTiles: C 
       }
   }
   return chunks;
-}
-
-/** Composites the rendered tiles of one channel into a chunk-sized RGBA buffer, or null. */
-async function renderChunkChannel(entries, channel, { tiles, tilePixels: S, chunkTiles: C }, cx, cy) {
-  const P = S * C;
-  const composite = [];
-  for (const { cell, px, py } of entries) {
-    const input = await tiles.render(cell.appearance, channel);
-    if (input) composite.push({ input, left: px - cx * P + S, top: py - cy * P + S });
-  }
-  if (!composite.length) return null;
-  // Two-tile gutter provides a fixed nonnegative composite origin.
-  const padded = P + S * 4;
-  const full = await sharp({
-    create: { width: padded, height: padded, channels: 4, background: '#00000000' },
-  })
-    .composite(composite)
-    .raw()
-    .toBuffer();
-  return sharp(full, { raw: { width: padded, height: padded, channels: 4 } })
-    .extract({ left: S * 2, top: S * 2, width: P, height: P })
-    .raw()
-    .toBuffer();
 }
 
 /** Builds the full-map overview buffers per channel from the downscaled chunk parts. */
@@ -153,6 +125,9 @@ export async function renderLevel({
   isTopDeck,
   onChunk,
   onPyramid,
+  renderPool,
+  mapId,
+  signal,
 }) {
   const { width, height, tilePixels: S, chunkTiles: C } = geometry;
   const P = S * C;
@@ -176,40 +151,31 @@ export async function renderLevel({
   const chunkIndex = [];
   const overviewParts = new Map();
   let rendered = 0;
-  for (const [key, entries] of chunks) {
+  const results = await mapConcurrent([...chunks], renderPool?.size || 1, async ([key, entries]) => {
+    signal?.throwIfAborted();
     const [cx, cy] = key.split(',').map(Number);
-    onChunk(++rendered, chunks.size);
-    // Every channel of a chunk shares one strip, so a view needs one request
-    // per chunk instead of one per channel. Slots follow CHANNELS order.
-    const slots = [];
-    for (const channel of CHANNELS) {
-      let raw = null;
-      if (channel === 'natural') {
-        if (terrain?.chunks.has(key)) raw = await terrain.render(cx, cy);
-      } else
-        raw = await renderChunkChannel(entries, channel, { tiles, tilePixels: S, chunkTiles: C }, cx, cy);
-      if (raw) slots.push({ channel, raw });
-    }
-    if (!slots.length) continue;
-    await writeStrip(
-      `${levelDir}/${stripName(cx, cy)}`,
-      Buffer.concat(slots.map((slot) => slot.raw)),
-      P,
-      P * slots.length,
-    );
-    for (const { channel, raw } of slots) {
+    const task = {
+      entries,
+      geometry,
+      cx,
+      cy,
+      levelDir,
+      mapId,
+      naturalRaw: terrain?.chunks.has(key) ? await terrain.render(cx, cy) : null,
+    };
+    const result = renderPool ? await renderPool.run(task) : await renderChunk(task, tiles);
+    onChunk?.(++rendered, chunks.size);
+    return result;
+  });
+  // Collect in insertion order, independent of worker completion order.
+  for (const result of results) {
+    if (!result) continue;
+    chunkIndex.push(result.index);
+    for (const { channel, input, left, top } of result.parts) {
       let parts = overviewParts.get(channel);
       if (!parts) overviewParts.set(channel, (parts = []));
-      parts.push({
-        input: await sharp(raw, { raw: { width: P, height: P, channels: 4 } })
-          .resize(C * OVERVIEW_PIXELS, C * OVERVIEW_PIXELS, { kernel: 'nearest' })
-          .png()
-          .toBuffer(),
-        left: cx * C * OVERVIEW_PIXELS,
-        top: cy * C * OVERVIEW_PIXELS,
-      });
+      parts.push({ input: Buffer.from(input), left, top });
     }
-    chunkIndex.push([cx, cy, channelMask(slots.map((slot) => slot.channel))]);
   }
   onPyramid?.();
   const pyramid = await buildPyramid(levelDir, chunkIndex, P);

@@ -9,7 +9,7 @@ export default defineConfig({
   // Do not index/watch thousands of generated files and old map snapshots.
   server: { watch: { ignored: ['**/public/data/**', '**/.cache/**', '**/.source/**', '**/dist/**'] } },
   optimizeDeps: { entries: ['index.html'] },
-  build: { target: 'es2022' },
+  build: { target: 'es2022', rollupOptions: { input: 'index.html' } },
   plugins: [
     devAssets(),
     {

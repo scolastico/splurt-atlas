@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, mkdirSync, cpSync, writeFileSync } from 'nod
 import path from 'node:path';
 export function copyPublic(out) {
   const publicRoot = path.resolve('public'),
-    dataRoot = path.join(publicRoot, 'data');
+    dataRoot = path.resolve(process.env.ATLAS_DATA_ROOT || path.join(publicRoot, 'data'));
   const manifest = JSON.parse(readFileSync(path.join(dataRoot, 'manifest.json')));
   const selected = path.resolve(dataRoot, manifest.dataPath || '.');
   if (selected !== dataRoot && !selected.startsWith(dataRoot + path.sep))

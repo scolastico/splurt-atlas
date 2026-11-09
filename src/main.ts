@@ -1,9 +1,11 @@
 // Entry point: wires the sidebar, map controls and rendering together, then
 // loads the catalog and the station named in the link.
 import './style.css';
+import { initComparisonRendering } from './rendering/comparison.ts';
+import { datasetPaths } from './model/dataset-paths.ts';
 import { installDebugHook } from './core/debug.ts';
 import { initCameraControls } from './ui/camera.ts';
-import { assetCache, catalogBase, fetchManifest, setDataBase } from './data/source.ts';
+import { assetCache, catalogBase, fetchManifest, setDataBase, datasets } from './data/source.ts';
 import { initDoorRoles } from './ui/door-roles.ts';
 import { $, checkbox } from './core/dom.ts';
 import { redraw } from './core/frame.ts';
@@ -45,6 +47,7 @@ function initDisplayToggles(): void {
     }
   };
   checkbox('mapping-helpers').onchange = redraw;
+  checkbox('changed-tiles').onchange = redraw;
   checkbox('random-markers').onchange = () => {
     paintInspector();
     redraw();
@@ -61,6 +64,15 @@ function initStationSelection(): void {
   const select = $<HTMLSelectElement>('station');
   select.onchange = () => (select.value ? void loadStation(select.value) : showMapPicker());
   window.addEventListener('hashchange', () => {
+    const paths = datasetPaths(
+      location.hash,
+      document.baseURI,
+      new URLSearchParams(location.search).get('data') || './data/',
+    );
+    if (paths.current.href !== datasets.current.href || paths.old.href !== datasets.old.href) {
+      location.reload();
+      return;
+    }
     if (consumeHistoryHashChange()) return;
     const id = currentHashParams().get('m');
     if (id && state.manifest?.maps.some((map) => map.id === id)) {
@@ -100,7 +112,9 @@ async function boot(): Promise<void> {
       );
     const repository = manifest.repository.replace(/\.git$/, '');
     $<HTMLAnchorElement>('source-link').href = repository;
+    $('source-link').hidden = !repository;
     $<HTMLAnchorElement>('commit-link').href = `${repository}/commit/${manifest.commit}`;
+    $('commit-link').hidden = !repository || !/^[a-f\d]{40}$/i.test(manifest.commit);
     $('upstream-commit').textContent = manifest.commit.slice(0, 12);
     fillStationSelect();
     const id = currentHashParams().get('m');
@@ -116,6 +130,22 @@ async function boot(): Promise<void> {
   }
 }
 
+state.current = currentHashParams().get('current') || undefined;
+state.old = currentHashParams().get('old') || undefined;
+$<HTMLInputElement>('current-path').value = state.current || '';
+$<HTMLInputElement>('old-path').value = state.old || '';
+$('comparison-form').onsubmit = (event) => {
+  event.preventDefault();
+  const params = currentHashParams();
+  for (const key of ['current', 'old']) {
+    const value = $<HTMLInputElement>(key + '-path').value.trim();
+    if (value) params.set(key, value);
+    else params.delete(key);
+  }
+  params.delete('o');
+  location.hash = params.toString();
+  location.reload();
+};
 initSourceLink();
 initLayout(() => {
   if (state.selected) showSidebarView('inspect');
@@ -130,6 +160,7 @@ initSearch(() => {
 });
 initInspector();
 initHistory();
+initComparisonRendering();
 initCameraControls();
 initMapContextMenu();
 initRender();

@@ -28,8 +28,8 @@ jobs:
       release: ${{ steps.check.outputs.release }}
       artifact_run: ${{ steps.check.outputs.artifact_run }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Compare upstream with the last published catalog
@@ -47,23 +47,23 @@ jobs:
       actions: read
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Restore converted maps from release branch
         if: needs.upstream.outputs.release == 'true' && !inputs.full_rebuild
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: release
           path: .cache/baseline
           sparse-checkout: data
       - name: Recover completed conversion from an earlier run
         if: needs.upstream.outputs.release != 'true' && needs.upstream.outputs.artifact_run != '' && !inputs.full_rebuild
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: station-atlas
           path: .cache/baseline
@@ -80,7 +80,7 @@ jobs:
         env:
           ATLAS_UPSTREAM_COMMIT: ${{ needs.upstream.outputs.commit }}
       - name: Cache upstream checkout
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .source
           key: splurt-source-${{ runner.os }}-${{ needs.upstream.outputs.commit }}
@@ -112,7 +112,7 @@ jobs:
           appendFileSync(process.env.GITHUB_STEP_SUMMARY,`## Map conversion\n\nRebuilt: ${report.rebuilt.join(', ')||'none'}\n\nReused: ${report.reused.join(', ')||'none'}\n\nUpstream files changed: ${report.changedFiles?.length??'baseline unavailable'}\n`);
           NODE
       - name: Save static build for review and recovery
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: station-atlas
           path: dist
@@ -126,8 +126,8 @@ jobs:
       contents: write
       pages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: station-atlas
           path: dist
@@ -158,20 +158,21 @@ jobs:
       cancel-in-progress: false
     timeout-minutes: 45
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: station-atlas
           path: dist
       - name: Switch Pages to deploy from this workflow
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
         with:
           enablement: true
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
+          include-hidden-files: true
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
         with:
           # Thousands of map files take longer than the ten-minute default.
           timeout: 2400000

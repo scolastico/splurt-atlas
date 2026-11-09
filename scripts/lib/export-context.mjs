@@ -2,12 +2,14 @@
 // configuration, the pinned source checkout, the staging directory, the
 // command-line selection and the incremental baseline.
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { converterDigest, loadBaseline } from './incremental.mjs';
 import { changedFilesSince } from './upstream-changes.mjs';
+import { isStationConfig, readStationConfig } from './map-source.mjs';
 
-export const SOURCE_ROOT = '.source/S.P.L.U.R.T-tg';
+export const SOURCE_ROOT = process.env.ATLAS_SOURCE_ROOT || '.source/S.P.L.U.R.T-tg';
 const EXPORT_FLAGS = ['--incremental', '--adopt-baseline', '--full'];
 const STAGING_NAME = /^export-[a-f\d-]+$/;
 
@@ -45,7 +47,8 @@ export function selectMapIds(config, mapArgs, available) {
 
 /** The export configuration, with a staged upstream override applied when allowed. */
 export function loadExportConfig(env = process.env) {
-  const config = JSON.parse(readFileSync('atlas.config.json'));
+  const config = JSON.parse(readFileSync(env.ATLAS_CONFIG || 'atlas.config.json'));
+  if (env.ATLAS_DME) config.dme = env.ATLAS_DME;
   if (env.ATLAS_SOURCE_REF) {
     if (!/^[a-f\d]{40}$/.test(env.ATLAS_SOURCE_REF) || env.ATLAS_STAGE_ONLY !== '1')
       throw new Error('Local source overrides require a staged export and a full commit SHA');
@@ -56,6 +59,33 @@ export function loadExportConfig(env = process.env) {
 
 /** The provenance of the source checkout, verified against the configured pin. */
 export function loadProvenance(config, env = process.env) {
+  if (env.ATLAS_SOURCE_ROOT) {
+    const root = path.resolve(env.ATLAS_SOURCE_ROOT);
+    const git = (...args) =>
+      execFileSync('git', ['-c', `safe.directory=${root}`, '-C', root, ...args], {
+        encoding: 'utf8',
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+    let commit;
+    try {
+      if (path.relative(realpathSync(root), realpathSync(git('rev-parse', '--show-toplevel'))))
+        throw new Error('Source is an archive inside another repository');
+      commit = git('rev-parse', 'HEAD');
+    } catch {
+      return {
+        repository: env.ATLAS_SOURCE_REPOSITORY || config.repository || '',
+        commit: env.ATLAS_SOURCE_REVISION || config.ref || 'unversioned',
+        dirty: true,
+        revisionVerified: false,
+      };
+    }
+    let repository = env.ATLAS_SOURCE_REPOSITORY || config.repository;
+    try {
+      if (!env.ATLAS_SOURCE_REPOSITORY) repository = git('remote', 'get-url', 'origin');
+    } catch {}
+    return { repository, commit, dirty: Boolean(git('status', '--porcelain', '--untracked-files=normal')) };
+  }
   const provenance = JSON.parse(readFileSync('.source/provenance.json'));
   if (env.ATLAS_SOURCE_REF) provenance.commit = config.ref;
   if (provenance.commit !== config.ref) throw new Error('Source pin changed: run pnpm source first.');
@@ -95,6 +125,9 @@ export function createExportContext(env = process.env) {
     args.incremental && !args.full ? loadBaseline(env.ATLAS_BASELINE || '.cache/baseline/data') : null;
   const converter = converterDigest();
   const changed = baseline ? changedFilesSince(root, baseline.manifest.commit, provenance.commit) : null;
-  const selected = selectMapIds(config, args.mapArgs, availableMapIds(root));
+  const selected = selectMapIds(config, args.mapArgs, availableMapIds(root)).filter((id) =>
+    isStationConfig(readStationConfig(root, id)),
+  );
+  if (!selected.length) throw new Error('No station maps selected');
   return { config, root, cacheRoot, output, provenance, args, baseline, converter, changed, selected };
 }

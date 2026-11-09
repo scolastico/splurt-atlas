@@ -23,7 +23,7 @@ The dev tools open from the small **Dev** pill at the bottom center of the viewe
 
 By default the development server converts only Box Station, NorthStar and Ice Box so regeneration stays quick. Set `ATLAS_DEV_MAPS` to a comma-separated list of map IDs (the `_maps` JSON basenames) for a different subset, or to `all` for every station as CI exports it. A selection saved in the dev tools (`.cache/dev-settings.json`) takes precedence over the variable. Changing the selection counts as a change to report; the station picker only lists the converted maps.
 
-Conversion uses separate Node worker processes, balancing station batches by their previous exported size. The default is up to four workers, capped by CPU availability and a 2 GiB RAM budget per worker. Set `ATLAS_WORKERS` to a positive integer to override the default (up to eight, still capped by available resources), or set it to `1` for serial conversion. Each worker limits native image processing to one thread to avoid excessive competing threads. Completed maps are checkpointed during conversion; restarting an interrupted generation with the same generator hashes and upstream commit reuses those maps instead of rendering them again. The progress page combines the workers' progress. This also applies to the regular exporter and CI.
+Conversion prepares station metadata in one coordinator and feeds independent render chunks to a persistent pool of Node workers. Free workers immediately take the next chunk, so all workers can help finish a single remaining station or deck. Sprite gutters are retained, and output assembly follows a fixed order regardless of completion order. Map preparation, generated-terrain preparation and final zoom-pyramid assembly are currently coordinated serially. The default is up to four render workers, capped by CPU availability and a 2 GiB RAM estimate per worker, with memory reserved for the coordinator; container memory limits are respected. Set `ATLAS_WORKERS` to a positive integer to override the default (up to eight), or `1` for serial conversion. Each worker limits native image processing to one thread. Completed maps are checkpointed during conversion; restarting an interrupted development generation with the same input hashes can reuse them. Chunk progress is reported as workers finish. This also applies to the regular exporter and CI.
 
 A development-only loading page shows validation and export progress during a cold start and opens the viewer automatically when ready, preserving the URL fragment. Errors stop automatic retries until an input changes or you click **Retry preparation**. Deleting a generated file is repaired automatically.
 
@@ -34,6 +34,283 @@ pnpm source --from ../S.P.L.U.R.T-tg
 ```
 
 The project owns its checkout under `.source/S.P.L.U.R.T-tg/`. A local clone reuses Git objects with hard links when available; working files are independent. To retrieve everything from GitHub instead, omit `--from`. The initial source acquisition can be large; the game includes extensive art and audio. `.source`, dependencies, generated maps and build output are ignored by Git.
+
+## Generate datasets and CI previews
+
+The generator is provided as a **Docker CLI rather than a native GitHub Action** for interoperability and permission separation. The same image can run locally, in GitHub Actions, or in any other CI system with Docker support. Generation does not depend on GitHub-specific APIs; publishing and PR comments are handled separately.
+
+In the GitHub Actions examples below, the generator container receives only a read-only source checkout and a writable output directory. Checkout credentials are not persisted, no GitHub tokens or Actions secrets are passed into the container, and networking is disabled. The generator therefore has no GitHub credentials or push permissions of its own. Publishing steps on the runner use the workflow token to deploy and comment; that token is not passed into the generator container. This separation reduces credential exposure when processing PR source; it depends on the environment and mounts you provide, since explicitly passing secrets or mounting credential files would make those accessible inside the container.
+
+Build the CLI image once from this repository:
+
+```sh
+docker build -t station-atlas .
+```
+
+Mount a checked-out station repository read-only and an **empty** output folder. The generator uses the checkout's current branch/commit and working files; it does not fetch, check out branches, or write into the mount. Pick the branch in your CI checkout step. Run once for each revision to retain comparable datasets.
+
+```sh
+mkdir -p output
+docker run --rm \
+  -v "$PWD/station:/source:ro" \
+  -v "$PWD/output:/output" \
+  station-atlas --source /source --output /output --maps boxstation --workers 4
+```
+
+The output above contains `manifest.json` and the map folders. Add `--viewer` to produce a ready-to-host static site with `index.html`, bundled assets and `data/`. Serve the output over HTTP or publish it through your CI's static preview hosting. Use `--base /preview/123/` for a fixed hosting prefix; the default `./` supports relative hosting paths. Output folders must be empty so retained datasets cannot accidentally be overwritten.
+
+The same CLI runs without Docker:
+
+```sh
+node scripts/cli.mjs --source ../station --output ../preview --viewer
+node scripts/cli.mjs --help
+```
+
+Optional flags: `--maps id,id` (all station configurations by default), `--baseline /baseline` (a previous **data** directory mounted read-only), `--full`, `--config /config/atlas.json`, `--dme custom.dme`, `--revision SHA` and `--repository URL`. The DM project is auto-detected: `tgstation.dme` takes precedence, otherwise the sole root-level `.dme` is used. A missing baseline commit falls back to fingerprint comparison without fetching into the source mount. Uncommitted edits disable the fast Git-only reuse check and are recorded as `dirty` in the manifest.
+
+Compatibility follows the atlas parser: BYOND DMM/TGM maps, DMI sprites, a DM project with source includes, and tgstation-family `_maps/<id>.json` configurations with `map_path`, `map_file` and `map_name`. Other repository layouts need a source adapter. Runtime reconstruction still has the accuracy limits below; the container does not run BYOND. Source directories need README.md and LICENSE. Git metadata is optional: for source archives or worktrees whose Git directory is outside the mount, pass `--revision SHA --repository URL` to label the export. These labels are marked unverified, and Git-only reuse is disabled; without a label the revision is `unversioned`.
+
+For a pull-request preview, check out the station PR in `station/`, build/use the atlas image, run the command with `--viewer`, then publish `output/` using your existing CI preview host. To accelerate a later run, mount a previous export and pass `--baseline /baseline`; with a viewer bundle the baseline directory is its `data/` subfolder.
+
+## GitHub Actions: automatic atlases and PR previews
+
+Main pushes publish the generator as `ghcr.io/scolastico/splurt-atlas:latest`. The [container workflow](.github/workflows/container.yml) builds on every push to this repository's `main` and updates the same `:latest` tag after a successful build. It also supports manual runs on `main`; older queued commits are skipped once superseded. Forking this atlas repository publishes under the fork's lowercase `ghcr.io/OWNER/REPOSITORY:latest` name instead. After the first publication, make the GHCR package **public** once so station repositories can pull it without credentials; [new GHCR packages start private](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pushing-container-images).
+
+These examples use the same [PR preview action as !3](https://github.com/not-three/ui/blob/main/.github/workflows/preview.yml), with Docker replacing the native application build. The generator is supplied only as a container; no atlas-specific GitHub Action or publishing script is required. Deployment is handled by general-purpose [GitHub Pages](https://github.com/JamesIves/github-pages-deploy-action) and [PR preview](https://github.com/rossjrw/pr-preview-action) actions.
+
+Copy either or both files into **your station repository's** `.github/workflows/` directory. Change `ATLAS_MAPS` to your station configuration IDs; omit `--maps "$ATLAS_MAPS"` to generate all stations. In **Settings > Pages**, select **GitHub Actions**. Allow the declared workflow permissions and deployments from the trusted base branches in the `github-pages` environment. Reserve `gh-pages` for generated files and allow force pushes there.
+
+### Example 1: main atlas
+
+Copy [atlas-main.yml](examples/github-actions/atlas-main.yml) as `.github/workflows/atlas-main.yml`:
+
+```yaml
+name: Main station atlas
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Use the identical group in both workflows; never cancel a publish or cleanup.
+concurrency:
+  group: station-atlas-pages
+  cancel-in-progress: false
+  queue: max
+
+env:
+  ATLAS_IMAGE: ghcr.io/scolastico/splurt-atlas:latest
+  ATLAS_MAPS: boxstation # Your _maps/*.json basenames, comma-separated.
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Generate the atlas in Docker
+        run: |
+          mkdir -p "$RUNNER_TEMP/atlas-output"
+          chmod 777 "$RUNNER_TEMP/atlas-output"
+          docker pull "$ATLAS_IMAGE"
+          docker run --rm --network none --cap-drop ALL \
+            --security-opt no-new-privileges \
+            -v "$GITHUB_WORKSPACE:/source:ro" \
+            -v "$RUNNER_TEMP/atlas-output:/output" \
+            "$ATLAS_IMAGE" --source /source --output /output --viewer --maps "$ATLAS_MAPS"
+          touch "$RUNNER_TEMP/atlas-output/.nojekyll"
+      - name: Update main files, keeping all previews
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: ${{ runner.temp }}/atlas-output
+          clean-exclude: |
+            pr-preview/
+            CNAME
+          single-commit: true
+      - name: Read the complete site
+        uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+          path: published
+          persist-credentials: false
+      - uses: actions/configure-pages@v6
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: published
+          include-hidden-files: true
+      - uses: actions/deploy-pages@v5
+        id: deployment
+        with:
+          timeout: 2400000
+          error_count: 10
+```
+
+`clean-exclude` preserves PR previews and the root `CNAME`. `single-commit` replaces the deployment history. The complete `gh-pages` tree is then uploaded to Pages, so deploying main keeps the previews online too.
+
+### Example 2: PR previews and cleanup
+
+Copy [atlas-pr.yml](examples/github-actions/atlas-pr.yml) as `.github/workflows/atlas-pr.yml` on the station repository's default branch:
+
+```yaml
+name: PR station atlas previews
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: station-atlas-pages
+  cancel-in-progress: false
+  queue: max
+
+env:
+  ATLAS_IMAGE: ghcr.io/scolastico/splurt-atlas:latest
+  ATLAS_MAPS: boxstation
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check the current PR state
+        id: preview_action
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.number }}
+          EVENT: ${{ github.event.action }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          read -r state head < <(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '[.state, .head.sha] | @tsv')
+          action=none
+          if [ "$state" = closed ]; then
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/gh-pages" >/dev/null 2>&1; then action=remove; fi
+          elif [ "$EVENT" != closed ] && [ "$head" = "$EXPECTED_SHA" ]; then
+            action=deploy
+          fi
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        if: steps.preview_action.outputs.action != 'none'
+        with:
+          ref: ${{ steps.preview_action.outputs.action == 'deploy' && format('refs/pull/{0}/head', github.event.number) || github.event.repository.default_branch }}
+          persist-credentials: false
+          # Checkout v7 requires this for fork PR data; never execute PR scripts.
+          allow-unsafe-pr-checkout: true
+      - name: Generate the PR atlas in Docker
+        if: steps.preview_action.outputs.action == 'deploy'
+        run: |
+          mkdir -p "$RUNNER_TEMP/atlas-output"
+          chmod 777 "$RUNNER_TEMP/atlas-output"
+          docker pull "$ATLAS_IMAGE"
+          docker run --rm --network none --cap-drop ALL \
+            --security-opt no-new-privileges \
+            -v "$GITHUB_WORKSPACE:/source:ro" \
+            -v "$RUNNER_TEMP/atlas-output:/output" \
+            "$ATLAS_IMAGE" --source /source --output /output --viewer --maps "$ATLAS_MAPS"
+      - name: Update or remove this PR's preview
+        if: steps.preview_action.outputs.action != 'none'
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+          source-dir: ${{ runner.temp }}/atlas-output
+          action: ${{ steps.preview_action.outputs.action }}
+          comment: false # Comment only after the explicit Pages deployment below.
+      - uses: actions/checkout@v7
+        if: steps.preview_action.outputs.action != 'none'
+        with:
+          ref: gh-pages
+          path: published
+      - name: Keep a single commit and support previews without a main atlas
+        if: steps.preview_action.outputs.action != 'none'
+        working-directory: published
+        run: |
+          test -f index.html || printf '<!doctype html><title>Station atlas previews</title><h1>Station atlas PR previews</h1>' > index.html
+          touch .nojekyll
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          previous=$(git rev-parse HEAD)
+          git add --all
+          snapshot=$(git commit-tree "$(git write-tree)" -m 'Current atlas and PR previews')
+          git push --force-with-lease="refs/heads/gh-pages:$previous" origin "$snapshot:refs/heads/gh-pages"
+      - uses: actions/configure-pages@v6
+        if: steps.preview_action.outputs.action != 'none'
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v5
+        if: steps.preview_action.outputs.action != 'none'
+        with:
+          path: published
+          include-hidden-files: true
+      - uses: actions/deploy-pages@v5
+        if: steps.preview_action.outputs.action != 'none'
+        id: deployment
+        with:
+          timeout: 2400000
+          error_count: 10
+      - uses: marocchino/sticky-pull-request-comment@v3
+        if: steps.preview_action.outputs.action == 'deploy'
+        with:
+          header: station-atlas
+          message: 'Station atlas preview: ${{ steps.deployment.outputs.page_url }}pr-preview/pr-${{ github.event.number }}/'
+      - uses: marocchino/sticky-pull-request-comment@v3
+        if: steps.preview_action.outputs.action == 'remove'
+        with:
+          header: station-atlas
+          only_update: true
+          message: 'The station atlas preview was removed because this pull request is closed.'
+```
+
+The preview action updates only `pr-preview/pr-<number>/` and removes that folder when a PR closes, whether merged or not. A short Git step resets the combined branch history after each update or removal. The sticky comment links to the preview only after Pages has finished deploying, and changes to a removal message after cleanup. The live-state check skips stale PR events and prevents a late build from restoring a closed preview. If installed alone, the preview workflow creates a minimal root index; a main deployment replaces it later.
+
+Both workflows use the identical queued concurrency group and never cancel active runs. This serializes generation and publication for straightforward ordering and preserves queued cleanup jobs. Each works without the other. Main updates preserve `pr-preview/`, and preview updates preserve the main atlas and other previews. All content is deployed together from `gh-pages`, whose visible history stays at one commit. The generator's default relative URLs work at both the site root and preview subfolders.
+
+`pull_request_target` allows previews and cleanup for fork PRs. Checkout v7 requires the explicit fork-checkout opt-in shown above to fetch PR files for the container. Keep native PR scripts out of this workflow: the source checkout is read only by the Docker generator, with no credentials or network passed into it. The established deployment actions and the short publishing commands run on the host with the workflow's permissions. Preview comments are handled separately because [a `GITHUB_TOKEN` branch push does not trigger a Pages build](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site); these examples explicitly deploy the combined Pages artifact before commenting.
+
+## Compare two revisions
+
+The normal atlas accepts **current** and **old** data paths in its URL fragment. Each omitted path defaults to the normal dataset (`./data/`, or the existing `?data=` override). If both are omitted or resolve to the same manifest URL, the atlas uses its normal single view. Paths may name a data directory or its manifest; snapshot manifests with `dataPath` work directly. You can also enter paths under **Compare datasets** in the sidebar.
+
+Different paths split the normal atlas into Current and Old panes, both using native-resolution chunks and the same layer controls. Pan, zoom, deck changes and tile selection stay synchronized. For a changed tile, the inspector shows Current and Previous in independently scrolling sections. Drag their divider to adjust the space for each revision, or double-click it to reset; the split is remembered on this device. Unchanged tiles show only Current. **Detailed view** shows the old revision's source links and raw properties too.
+
+**Highlight changed tiles** is enabled automatically for comparison links without an `o` options fragment. Its pulsing rings mark added tiles in green, removed tiles in red, modified source facts in amber, and sprite-only changes in blue. The toggle is stored in shared URLs with the other options. Source changes appear first; a background worker checks every native sprite channel, including hidden utilities, and adds sprite-only changes as it finishes. Coordinates remain BYOND XYZ across different map sizes and deck sets. Dictionary and area renumbering do not create false changes.
+
+For example, compare a retained baseline with the normal dataset:
+
+```text
+./#m=boxstation&old=./baseline/data/
+```
+
+Or choose both datasets explicitly:
+
+```text
+./#m=blueshift&z=1&current=./revisions/new/data/&old=./revisions/old/data/
+```
+
+Serve both retained datasets over HTTP; remote hosts must permit CORS. Current datasets have separate offline cache scopes by manifest URL. Old comparison assets are fetched on demand. For useful reviews, generate both revisions with the same atlas version and settings. Dataset comparison opens directly in the normal atlas; there is no separate comparison page.
 
 ## Explore
 

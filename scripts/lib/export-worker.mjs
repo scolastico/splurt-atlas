@@ -1,5 +1,5 @@
-// Converts a list of stations in this process. The parallel driver
-// (export-parallel.mjs) spawns one of these per worker.
+// Prepares stations and assembles their outputs. Rendering can use the shared
+// chunk pool supplied by export-parallel.mjs, or run serially in this process.
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -60,7 +60,7 @@ function buildAppearances(map, db) {
   return { expanded, at };
 }
 
-export async function runExportWorker() {
+export async function runExportWorker({ renderPool, workers = 1, signal } = {}) {
   const progress = exportProgress();
   sharp.concurrency(Number(process.env.ATLAS_SHARP_THREADS) || 1);
   sharp.cache({ memory: 128, files: 20, items: 100 });
@@ -69,7 +69,7 @@ export async function runExportWorker() {
   mkdirSync(output, { recursive: true });
   console.log('Indexing DM declarations in include order…');
   progress.update('Indexing DM declarations');
-  const db = loadTypes(root);
+  const db = loadTypes(root, config.dme);
   const sprites = createSpriteReader(root);
   const usage = trackUsage(db, sprites);
   console.log(`${db.types.size} types from ${db.fileCount} DM files`);
@@ -80,6 +80,7 @@ export async function runExportWorker() {
     ...provenance,
     tilePixels: config.tilePixels,
     chunkTiles: config.chunkTiles,
+    dme: config.dme,
     maps: [],
   };
   /** Writes the manifest so far, so an interrupted run can resume from completed maps. */
@@ -99,6 +100,7 @@ export async function runExportWorker() {
   const recordAtomIcon = (atom) => usage.recordIcon(unquote({ ...db.resolve(atom.path), ...atom.vars }.icon));
 
   for (const [mapIndex, id] of selected.entries()) {
+    signal?.throwIfAborted();
     const mapProgress = (fraction) => (100 * (mapIndex + fraction)) / selected.length;
     progress.update(`Preparing ${id} (${mapIndex + 1}/${selected.length})`, mapProgress(0));
     tiles.clear();
@@ -106,6 +108,7 @@ export async function runExportWorker() {
     const previous = baseline?.manifest.maps.find((map) => map.id === id);
     const dir = `${output}/${id}`;
     if (
+      !provenance.dirty &&
       canQuickReuse(baseline, previous, converter, changed, config) &&
       completeMap(baseline.root, previous)
     ) {
@@ -181,6 +184,9 @@ export async function runExportWorker() {
     for (const [levelIndex, z] of levels.entries()) {
       console.log(`${station.map_name} · Z${z}: rendering ${width} × ${height}`);
       const result = await renderLevel({
+        signal,
+        renderPool,
+        mapId: id,
         z,
         cells,
         definitions,
@@ -226,8 +232,17 @@ export async function runExportWorker() {
     manifest.maps.push(entry);
     checkpoint();
   }
+  signal?.throwIfAborted();
   copyCredits(root, output);
   writeAssetSources(output, provenance, manifest.maps);
+  const spriteReport = { ...sprites.report, samples: [...sprites.report.samples] };
+  if (renderPool) {
+    for (const key of ['requested', 'missingIcon', 'missingState'])
+      spriteReport[key] += renderPool.report[key];
+    spriteReport.samples.push(
+      ...renderPool.report.samples.slice(0, Math.max(0, 20 - spriteReport.samples.length)),
+    );
+  }
   writeBuildReport(output, {
     commit: provenance.commit,
     baseline: baseline?.manifest.commit || null,
@@ -235,11 +250,13 @@ export async function runExportWorker() {
     rebuilt,
     reused,
     forced: args.full,
+    workers,
+    sprites: spriteReport,
   });
   writeFileSync(`${output}/manifest.json`, JSON.stringify(manifest, null, 2));
   // Release libvips file handles before the atomic directory swap on Windows.
   sharp.cache(false);
   if (process.env.ATLAS_STAGE_ONLY !== '1') promote(output);
   progress.finish();
-  console.log(`Exported ${manifest.maps.length} stations. Sprite report:`, sprites.report);
+  console.log(`Exported ${manifest.maps.length} stations. Sprite report:`, spriteReport);
 }

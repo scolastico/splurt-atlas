@@ -1,5 +1,13 @@
 // Loading a station: decoding its metadata and decks, restoring the view from
 // the link, and the station picker shown when no station is selected.
+import {
+  loadComparison,
+  comparisonLevels,
+  comparisonMap,
+  oldView,
+  startSpriteComparison,
+  stopSpriteComparison,
+} from '../data/comparison.ts';
 import { resetAnnotationCaches } from '../rendering/annotations.ts';
 import { mapCanvas } from '../rendering/canvases.ts';
 import { fit } from './camera.ts';
@@ -48,7 +56,7 @@ export function setDeck(z: number): void {
 
 function renderDeckButtons(map: MapMeta): void {
   $('decks').replaceChildren();
-  for (const z of [...map.levels].reverse()) {
+  for (const z of comparisonLevels().reverse()) {
     const button = document.createElement('button');
     button.textContent = `Z${String(z).padStart(2, '0')}`;
     button.onclick = () => setDeck(z);
@@ -68,20 +76,27 @@ function describeStation(map: MapMeta): void {
 function restoreView(map: MapMeta, params: URLSearchParams): void {
   const hasView = ['x', 'y', 's'].every((key) => params.has(key) && Number.isFinite(Number(params.get(key))));
   if (hasView) {
-    state.x = Math.max(0, Math.min(map.width * TILE, Number(params.get('x'))));
-    state.y = Math.max(0, Math.min(map.height * TILE, Number(params.get('y'))));
+    state.x = Math.max(
+      0,
+      Math.min((state.comparisonBounds?.width || map.width) * TILE, Number(params.get('x'))),
+    );
+    state.y = Math.max(
+      -(state.comparisonBounds?.offsetY || 0),
+      Math.min(map.height * TILE, Number(params.get('y'))),
+    );
     state.zoom = Math.max(0.04, Math.min(5, Number(params.get('s'))));
     redraw();
   }
-  const area = selectedArea(params, map);
-  const tile = area ? { x: area.x1, y: area.y1, z: area.z } : selectedTile(params, map);
+  const validationMap = comparisonMap();
+  const area = selectedArea(params, validationMap);
+  const tile = area ? { x: area.x1, y: area.y1, z: area.z } : selectedTile(params, validationMap);
   if (!tile) return;
   // A link that names a tile but no view (as the in-game "View in Browser"
   // link does) opens centered on that tile.
-  const centered = selectionCamera(params, map);
+  const centered = selectionCamera(params, validationMap);
   if (centered) {
     state.x = centered.x;
-    state.y = centered.y;
+    state.y = centered.y - (state.comparisonBounds?.offsetY || 0);
     state.zoom = centered.zoom;
     redraw();
   }
@@ -107,6 +122,7 @@ function withTileMasks(level: LevelData): DeckLevel {
 
 /** Loads a station; with `restore`, the view and selection come from the link. */
 export async function loadStation(id: string, restore = false): Promise<void> {
+  stopSpriteComparison();
   resetHistory();
   const generation = ++state.generation;
   assetCache.setCurrentMap(id);
@@ -155,9 +171,17 @@ export async function loadStation(id: string, restore = false): Promise<void> {
     if (generation !== state.generation) return;
     state.map = map;
     state.levels = new Map(levels.map((level) => [level.z, withTileMasks(decodeLevel(level) as LevelData)]));
+    await loadComparison(id, generation, signal);
+    if (generation !== state.generation) return;
     loadDoorRoles(map, restore ? (params.get('j') || '').split(',') : state.doorRoles);
     const requestedZ = restore ? Number(params.get('z')) : map.levels.at(-1)!;
-    state.z = map.levels.includes(requestedZ) ? requestedZ : map.levels.at(-1)!;
+    state.z = comparisonLevels().includes(requestedZ) ? requestedZ : map.levels.at(-1)!;
+    if (oldView.map) {
+      $('current-revision').textContent = 'Current · ' + state.manifest!.commit.slice(0, 12);
+      $('old-revision').textContent = 'Old · ' + oldView.manifest!.commit.slice(0, 12);
+      $('comparison-summary').textContent =
+        state.changedTiles.length + ' changed tiles. Green: added; red: removed; amber: modified.';
+    }
     describeStation(map);
     renderDeckButtons(map);
     setDeck(state.z);
@@ -180,6 +204,7 @@ export async function loadStation(id: string, restore = false): Promise<void> {
     redraw();
     share(true);
     enableSearch();
+    startSpriteComparison();
     void warmStorage();
   } catch (error) {
     if ((error as Error).name === 'AbortError') return;
@@ -197,6 +222,7 @@ function previewPath(map: { id: string; preview?: string | null; naturalPreview?
 
 /** Shows the station cards and clears the current station. */
 export function showMapPicker(): void {
+  stopSpriteComparison();
   resetHistory();
   const manifest = state.manifest!;
   assetCache.activeView = false;
@@ -210,6 +236,8 @@ export function showMapPicker(): void {
   state.generation++;
   loadAbort?.abort();
   state.map = null;
+  oldView.map = null;
+  state.changedTiles = [];
   state.ready = false;
   state.loadingStation = false;
   assetCache.foregroundBusy = false;

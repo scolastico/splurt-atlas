@@ -4,9 +4,13 @@
 import { AssetCache, type CacheProgress } from './asset-cache.ts';
 import { $ } from '../core/dom.ts';
 import type { Manifest } from '../core/types.ts';
+import { datasetPaths } from '../model/dataset-paths.ts';
 
 /** Location of data/manifest.json. */
-export const catalogBase = new URL('./data/', document.baseURI);
+const requestedDataset = new URLSearchParams(location.search).get('data');
+export const datasets = datasetPaths(location.hash, document.baseURI, requestedDataset || './data/');
+const catalogUrl = datasets.current;
+export const catalogBase = new URL('./', catalogUrl);
 
 /** Location of the current snapshot's map folders; the manifest may point into a subfolder. */
 let dataBase = catalogBase;
@@ -77,7 +81,7 @@ function showCacheActivity(active: boolean, info?: { currentReady: boolean }): v
     : 'The map may be slower while saving. Unready chunks may look blurry or pixelated.';
 }
 
-export const assetCache = new AssetCache(catalogBase.href, updateCacheStatus, showCacheActivity);
+export const assetCache = new AssetCache(catalogUrl.href, updateCacheStatus, showCacheActivity);
 
 /**
  * Map-scoped resources carry their export version in the query string, so
@@ -88,7 +92,7 @@ export function resolvePath(path: string): URL {
 }
 
 export function fetchManifest(): Promise<Manifest> {
-  return assetCache.catalog(new URL('manifest.json', catalogBase));
+  return assetCache.catalog(catalogUrl);
 }
 
 /** Loads a map-scoped JSON file through the cache. */

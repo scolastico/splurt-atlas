@@ -1,0 +1,115 @@
+name: PR station atlas previews
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: station-atlas-pages
+  cancel-in-progress: false
+  queue: max
+
+env:
+  ATLAS_IMAGE: ghcr.io/scolastico/splurt-atlas:latest
+  ATLAS_MAPS: boxstation
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check the current PR state
+        id: preview_action
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.number }}
+          EVENT: ${{ github.event.action }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          read -r state head < <(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '[.state, .head.sha] | @tsv')
+          action=none
+          if [ "$state" = closed ]; then
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/gh-pages" >/dev/null 2>&1; then action=remove; fi
+          elif [ "$EVENT" != closed ] && [ "$head" = "$EXPECTED_SHA" ]; then
+            action=deploy
+          fi
+          echo "action=$action" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        if: steps.preview_action.outputs.action != 'none'
+        with:
+          ref: ${{ steps.preview_action.outputs.action == 'deploy' && format('refs/pull/{0}/head', github.event.number) || github.event.repository.default_branch }}
+          persist-credentials: false
+          # Checkout v7 requires this for fork PR data; never execute PR scripts.
+          allow-unsafe-pr-checkout: true
+      - name: Generate the PR atlas in Docker
+        if: steps.preview_action.outputs.action == 'deploy'
+        run: |
+          mkdir -p "$RUNNER_TEMP/atlas-output"
+          chmod 777 "$RUNNER_TEMP/atlas-output"
+          docker pull "$ATLAS_IMAGE"
+          docker run --rm --network none --cap-drop ALL \
+            --security-opt no-new-privileges \
+            -v "$GITHUB_WORKSPACE:/source:ro" \
+            -v "$RUNNER_TEMP/atlas-output:/output" \
+            "$ATLAS_IMAGE" --source /source --output /output --viewer --maps "$ATLAS_MAPS"
+      - name: Update or remove this PR's preview
+        if: steps.preview_action.outputs.action != 'none'
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+          source-dir: ${{ runner.temp }}/atlas-output
+          action: ${{ steps.preview_action.outputs.action }}
+          comment: false # Comment only after the explicit Pages deployment below.
+      - uses: actions/checkout@v7
+        if: steps.preview_action.outputs.action != 'none'
+        with:
+          ref: gh-pages
+          path: published
+      - name: Keep a single commit and support previews without a main atlas
+        if: steps.preview_action.outputs.action != 'none'
+        working-directory: published
+        run: |
+          test -f index.html || printf '<!doctype html><title>Station atlas previews</title><h1>Station atlas PR previews</h1>' > index.html
+          touch .nojekyll
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          previous=$(git rev-parse HEAD)
+          git add --all
+          snapshot=$(git commit-tree "$(git write-tree)" -m 'Current atlas and PR previews')
+          git push --force-with-lease="refs/heads/gh-pages:$previous" origin "$snapshot:refs/heads/gh-pages"
+      - uses: actions/configure-pages@v6
+        if: steps.preview_action.outputs.action != 'none'
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v5
+        if: steps.preview_action.outputs.action != 'none'
+        with:
+          path: published
+          include-hidden-files: true
+      - uses: actions/deploy-pages@v5
+        if: steps.preview_action.outputs.action != 'none'
+        id: deployment
+        with:
+          timeout: 2400000
+          error_count: 10
+      - uses: marocchino/sticky-pull-request-comment@v3
+        if: steps.preview_action.outputs.action == 'deploy'
+        with:
+          header: station-atlas
+          message: 'Station atlas preview: ${{ steps.deployment.outputs.page_url }}pr-preview/pr-${{ github.event.number }}/'
+      - uses: marocchino/sticky-pull-request-comment@v3
+        if: steps.preview_action.outputs.action == 'remove'
+        with:
+          header: station-atlas
+          only_update: true
+          message: 'The station atlas preview was removed because this pull request is closed.'

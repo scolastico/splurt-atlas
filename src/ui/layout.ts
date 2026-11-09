@@ -66,6 +66,12 @@ export function setSidebarCollapsed(collapsed: boolean, persist = true): void {
 }
 
 export function showSidebarView(view: SidebarView): void {
+  document
+    .querySelector('.sidebar-scroll')!
+    .classList.toggle(
+      'inspector-split-active',
+      view === 'inspect' && $('inspector').classList.contains('split-inspector'),
+    );
   for (const name of ['explore', 'search', 'inspect'] as const) {
     $(name === 'inspect' ? 'selection-panel' : `${name}-panel`).hidden = name !== view;
     $(`${name}-tab`).setAttribute('aria-pressed', String(name === view));

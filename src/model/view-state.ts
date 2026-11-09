@@ -101,6 +101,7 @@ export const optionBits = {
   'exact-search': 17,
   navigation: 18,
   'random-markers': 19,
+  'changed-tiles': 20,
 } as const;
 
 export type OptionKey = keyof typeof optionBits;
@@ -140,6 +141,8 @@ export interface ShareableView {
   offsetHighlights?: Set<number>;
   telecomHighlights?: Set<number>;
   infrastructureOrder?: readonly Infrastructure[];
+  current?: string;
+  old?: string;
 }
 
 /** Builds the `#m=…` fragment that restores a view. */
@@ -151,6 +154,8 @@ export function viewFragment(view: ShareableView): string {
     y: String(Math.round(view.y)),
     s: String(Number(view.zoom.toFixed(3))),
   });
+  if (view.current) params.set('current', view.current);
+  if (view.old) params.set('old', view.old);
   if (view.selected) params.set('t', `${view.selected.x},${view.selected.y},${view.selected.z}`);
   if (view.selectedArea) {
     const a = view.selectedArea;

@@ -1,5 +1,6 @@
 // The shareable URL fragment: the view, selection and sidebar options are
 // written back to the address bar so any state can be linked.
+import { datasets } from '../data/source.ts';
 import { $, checkbox } from '../core/dom.ts';
 import { invalidateUtilityPaths } from '../rendering/infrastructure-overlay.ts';
 import { updateSpaceAnimation } from '../rendering/space-background.ts';
@@ -27,6 +28,8 @@ let shareTimer: ReturnType<typeof setTimeout> | undefined;
 
 function optionsFragment(): string {
   const params = new URLSearchParams({ o: String(currentOptionMask()) });
+  if (state.current) params.set('current', state.current);
+  if (state.old) params.set('old', state.old);
   const order = infrastructureOrderParam(infrastructureOrder);
   if (order) params.set('u', order);
   return `#${params}`;
@@ -61,7 +64,10 @@ export function restoreOptions(params: URLSearchParams): boolean {
   if (params.has('u')) restoreInfrastructureOrder(normalizeInfrastructureOrder(params.get('u')!.split(',')));
   else if (params.has('m') || params.has('o')) restoreInfrastructureOrder(DEFAULT_INFRASTRUCTURE_ORDER);
   const raw = params.get('o');
-  if (raw === null) return false;
+  if (raw === null) {
+    checkbox('changed-tiles').checked = datasets.comparing;
+    return false;
+  }
   const options = decodeOptions(raw);
   if (!options) return false;
   for (const [key, value] of Object.entries(options) as [OptionKey, boolean][]) checkbox(key).checked = value;
@@ -85,7 +91,12 @@ export function currentHashParams(): URLSearchParams {
 /** Replaces the fragment with the options alone, as shown on the station picker. */
 export function shareOptionsOnly(): void {
   const fragment =
-    currentHashParams().has('o') || infrastructureOrderParam(infrastructureOrder) ? optionsFragment() : '';
+    state.current ||
+    state.old ||
+    currentHashParams().has('o') ||
+    infrastructureOrderParam(infrastructureOrder)
+      ? optionsFragment()
+      : '';
   cancelShare();
   replaceHistoryView(location.pathname + location.search + fragment);
 }

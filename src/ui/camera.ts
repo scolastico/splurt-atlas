@@ -1,5 +1,8 @@
 // Camera movement: fitting the station, zooming, and the pointer, wheel and
 // keyboard controls on the map canvas.
+import { oldCanvas, oldPointerOffset } from '../rendering/comparison.ts';
+import { datasets } from '../data/source.ts';
+import { oldView } from '../data/comparison.ts';
 import { goBack, goForward } from './history.ts';
 import { mapCanvas } from '../rendering/canvases.ts';
 import { $ } from '../core/dom.ts';
@@ -27,7 +30,15 @@ const KEY_PAN_SHIFT_FACTOR = 2;
 export function fit(): void {
   const map = state.map;
   if (!map) return;
-  const [minX, minY, maxX, maxY] = state.levels.get(state.z)?.bounds || [0, 0, map.width, map.height];
+  let [minX, minY, maxX, maxY] = state.levels.get(state.z)?.bounds || [0, 0, map.width, map.height];
+  const previous = oldView.levels.get(state.z)?.bounds;
+  if (oldView.map && previous) {
+    const offset = map.height - oldView.map.height;
+    minX = Math.min(minX, previous[0]);
+    minY = Math.min(minY, previous[1] + offset);
+    maxX = Math.max(maxX, previous[2]);
+    maxY = Math.max(maxY, previous[3] + offset);
+  }
   state.x = ((minX + maxX) * TILE) / 2;
   state.y = ((minY + maxY) * TILE) / 2;
   const availableWidth = state.w - sidebarInset() - 130;
@@ -60,7 +71,7 @@ export function panBy(worldX: number, worldY: number): void {
   share();
 }
 
-function initPointerControls(): void {
+function initPointerControls(mapCanvas: HTMLCanvasElement, offset = (): [number, number] => [0, 0]): void {
   const pointers = new Map<number, [number, number]>();
   let dragged = false;
   let downAt: [number, number] | null = null;
@@ -68,7 +79,8 @@ function initPointerControls(): void {
   let tapCandidate: { x: number; y: number; generation: number } | null = null;
   const canvasPoint = (event: MouseEvent): [number, number] => {
     const rect = mapCanvas.getBoundingClientRect();
-    return [event.clientX - rect.left, event.clientY - rect.top];
+    const [dx, dy] = offset();
+    return [event.clientX - rect.left + dx, event.clientY - rect.top + dy];
   };
 
   mapCanvas.onpointerdown = (event) => {
@@ -99,8 +111,13 @@ function initPointerControls(): void {
       const [a, b] = [...pointers.values()];
       const distance = Math.hypot(a[0] - b[0], a[1] - b[1]);
       const rect = mapCanvas.getBoundingClientRect();
+      const [dx, dy] = offset();
       if (pinchDistance > 0)
-        zoomBy(distance / pinchDistance, (a[0] + b[0]) / 2 - rect.left, (a[1] + b[1]) / 2 - rect.top);
+        zoomBy(
+          distance / pinchDistance,
+          (a[0] + b[0]) / 2 - rect.left + dx,
+          (a[1] + b[1]) / 2 - rect.top + dy,
+        );
       pinchDistance = distance;
       return;
     }
@@ -253,7 +270,8 @@ function stopPanning(): void {
 
 /** Mouse back and forward buttons step through the in-app history instead of the browser's. */
 export function initCameraControls(): void {
-  initPointerControls();
+  initPointerControls(mapCanvas);
+  if (datasets.comparing) initPointerControls(oldCanvas, oldPointerOffset);
   $('zoom-in').onclick = () => zoomBy(1.5);
   $('zoom-out').onclick = () => zoomBy(1 / 1.5);
   $('fit').onclick = fit;

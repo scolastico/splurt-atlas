@@ -1,5 +1,7 @@
 // The tile inspector: what is on the selected tile, what may spawn there,
 // door access and controls, and the objects drawn beside the tile.
+import { datasets } from '../data/source.ts';
+import { oldView, changedKeys, previousDefinition } from '../data/comparison.ts';
 import { groupDoorAccess } from '../model/door-highlights.ts';
 import { $, escapeHtml, isChecked } from '../core/dom.ts';
 import { redraw } from '../core/frame.ts';
@@ -11,6 +13,8 @@ import { definitionAt, infrastructureOrder, networkNames, palette, state } from 
 import { setDeck } from './station.ts';
 import type {
   Atom,
+  MapMeta,
+  Manifest,
   Definition,
   DoorAccess,
   DoorControl,
@@ -24,6 +28,7 @@ import type { AreaSelection } from '../model/view-state.ts';
 import { selectionDefinitions } from '../model/selection-data.ts';
 import { validTelecomHighlights } from '../model/telecomms.ts';
 import { telecommsSections } from './telecomms.ts';
+import { prepareInspectorLayout, splitInspector } from './inspector-split.ts';
 
 /** The finding shown with the selection, if the selection came from a search result. */
 let inspectedResult: (SearchRecord & { spawner?: string }) | null = null;
@@ -31,8 +36,7 @@ let inspectedResult: (SearchRecord & { spawner?: string }) | null = null;
 let detailedHtml = '';
 let tileCandidates: TileCandidate[] = [];
 
-function repositoryUrl(path: string): string {
-  const manifest = state.manifest!;
+function repositoryUrl(path: string, manifest = state.manifest!): string {
   return `${manifest.repository.replace(/\.git$/, '')}/blob/${manifest.commit}/${path}`;
 }
 
@@ -92,8 +96,9 @@ function detailedMarkup(
   z: number,
   definition: Definition,
   result: typeof inspectedResult,
+  map: MapMeta = state.map!,
+  manifest: Manifest = state.manifest!,
 ): string {
-  const map = state.map!;
   const area = map.areas[definition.area];
   const contents = definition.atoms.filter((atom) => !atom.path.startsWith('/turf/'));
   const resultMarkup = result
@@ -111,7 +116,7 @@ function detailedMarkup(
       ? ` <span style="color:${palette[atom.network]}">[${escapeHtml(networkNames[atom.network])}]</span>`
       : '';
     const source = atom.source
-      ? `<br><a href="${escapeHtml(repositoryUrl(atom.source))}" target="_blank" rel="noreferrer">DM declaration ↗</a>`
+      ? `<br><a href="${escapeHtml(repositoryUrl(atom.source, manifest))}" target="_blank" rel="noreferrer">DM declaration ↗</a>`
       : '';
     return `<li>${escapeHtml(atom.name)}${network}<details><summary>Type & overrides</summary><p>${escapeHtml(atom.path)}<br>${escapeHtml(JSON.stringify(atom.vars))}${source}</p></details></li>`;
   };
@@ -123,12 +128,19 @@ ${resultMarkup}
 <p>${aperture}${escapeHtml(definition.turf)}</p>
 <details open><summary>${contents.length} mapped objects</summary><ul>${contents.map(atomMarkup).join('')}</ul></details>
 <p>Utility sprites show mapped infrastructure. They do not simulate live connectivity, pressure or power.</p>
-<a href="${escapeHtml(repositoryUrl(map.files[0]))}" target="_blank" rel="noreferrer">View map source ↗</a>`;
+<a href="${escapeHtml(repositoryUrl(map.files[0], manifest))}" target="_blank" rel="noreferrer">View map source ↗</a>`;
 }
 
 /** Renders the friendly view: readable descriptions of the tile and what it holds. */
-function friendlyMarkup(x: number, y: number, z: number, definition: Definition): string {
-  const map = state.map!;
+function friendlyMarkup(
+  x: number,
+  y: number,
+  z: number,
+  definition: Definition,
+  map: MapMeta = state.map!,
+  candidatesHere = tileCandidates,
+  result = inspectedResult,
+): string {
   const area = map.areas[definition.area];
   const turf = definition.atoms.find((atom) => atom.path.startsWith('/turf/'));
   const shownTurf =
@@ -149,8 +161,8 @@ function friendlyMarkup(x: number, y: number, z: number, definition: Definition)
   const description = cleanText(shownTurf?.description)
     ? `. ${escapeHtml(cleanText(shownTurf!.description))}`
     : '';
-  const candidates = tileCandidates.length
-    ? `<p class="friendly-description">One or more of these may be chosen when the round begins.</p><ul class="friendly-list">${nameList(tileCandidates)}</ul>`
+  const candidates = candidatesHere.length
+    ? `<p class="friendly-description">One or more of these may be chosen when the round begins.</p><ul class="friendly-list">${nameList(candidatesHere)}</ul>`
     : `<p class="info-empty">${
         random
           ? 'Random objects may appear here. Their exact contents are decided when the round starts.'
@@ -175,7 +187,7 @@ function friendlyMarkup(x: number, y: number, z: number, definition: Definition)
 <span class="tiny-label">DECK ${z} · ${x}, ${y}</span>
 <h3>${escapeHtml(area.name)}</h3>
 <p class="friendly-description">${escapeHtml(cleanText(shownTurf?.name) || 'Station surface')}${description}</p>
-${inspectedResult ? `<p class="friendly-description">Selected finding: <strong>${escapeHtml(inspectedResult.name)}</strong></p>` : ''}
+${result ? `<p class="friendly-description">Selected finding: <strong>${escapeHtml(result.name)}</strong></p>` : ''}
 <h4 class="info-heading">What’s here</h4>
 ${here.length ? `<ul class="friendly-list">${nameList(here)}</ul>` : '<p class="info-empty">No objects are placed on this tile.</p>'}
 <h4 class="info-heading">What could appear</h4>
@@ -371,16 +383,39 @@ function offsetObjectsSection(definition: Definition): HTMLElement | null {
   return section;
 }
 
+function appendPrevious(x: number, y: number, z: number): void {
+  if (!datasets.comparing || !changedKeys.has(`${x},${y},${z}`)) return;
+  const definition = previousDefinition(x, y, z);
+  const section = document.createElement('section');
+  section.className = 'previous-tile';
+  const content = !definition
+    ? '<p>No mapped tile here.</p>'
+    : isChecked('detailed-view')
+      ? detailedMarkup(x, y, z, definition, null, oldView.map!, oldView.manifest!)
+      : friendlyMarkup(x, y, z, definition, oldView.map!, [], null);
+  section.innerHTML = '<h3 class="comparison-heading">Previous</h3>' + content;
+  section.querySelector('.close')?.remove();
+  $('inspector').append(section);
+  splitInspector(section);
+}
+
 /** Re-renders the inspector panel for the current selection and view mode. */
 export function paintInspector(): void {
   if (!state.selected || !state.map) return;
+  prepareInspectorLayout(JSON.stringify(state.selectedArea || state.selected));
   if (state.selectedArea) {
     paintAreaInspector(state.selectedArea);
     return;
   }
   const { x, y, z } = state.selected;
   const definition = definitionAt(x, y, z);
-  if (!definition) return;
+  if (!definition) {
+    $('inspector').innerHTML =
+      '<button class="close" aria-label="Close inspector">&times;</button><h3 class="comparison-heading">Current</h3><p>No mapped tile here.</p>';
+    appendPrevious(x, y, z);
+    $('inspector').querySelector<HTMLButtonElement>('.close')!.onclick = clearSelection;
+    return;
+  }
   const detailed = isChecked('detailed-view');
   const inspector = $('inspector');
   inspector.innerHTML = detailed ? detailedHtml : friendlyMarkup(x, y, z, definition);
@@ -409,6 +444,10 @@ export function paintInspector(): void {
   const offsets = offsetObjectsSection(definition);
   if (offsets) inspector.append(offsets);
   for (const section of telecommsSections()) inspector.append(section);
+  if (datasets.comparing) {
+    inspector.insertAdjacentHTML('afterbegin', '<h3 class="comparison-heading">Current</h3>');
+    appendPrevious(x, y, z);
+  }
   inspector.querySelector<HTMLButtonElement>('.close')!.onclick = clearSelection;
 }
 
@@ -427,11 +466,11 @@ export function inspect(
   const map = state.map;
   if (!map) return;
   const definition = definitionAt(x, y, z);
-  if (!definition || x < 1 || x > map.width || y < 1 || y > map.height) return;
+  if (!definition && !previousDefinition(x, y, z)) return;
   const same = state.selected?.x === x && state.selected?.y === y && state.selected?.z === z;
   if (highlights !== undefined)
     state.offsetHighlights = new Set(
-      highlights.filter((index) => Number.isInteger(index) && definition.atoms[index]?.visual),
+      highlights.filter((index) => Number.isInteger(index) && definition?.atoms[index]?.visual),
     );
   else if (!same) state.offsetHighlights = new Set();
   state.selected = { x, y, z };
@@ -458,7 +497,7 @@ export function inspect(
     shownResult = { ...result, kind: placed ? 'placed' : 'possible' };
   }
   if (shownResult?.kind === 'possible' && result) {
-    const contents = definition.atoms.filter((atom) => !atom.path.startsWith('/turf/'));
+    const contents = definition?.atoms.filter((atom) => !atom.path.startsWith('/turf/')) || [];
     shownResult = {
       ...shownResult,
       spawner:
@@ -467,7 +506,7 @@ export function inspect(
         'a static loot table',
     };
   }
-  detailedHtml = detailedMarkup(x, y, z, definition, shownResult);
+  detailedHtml = definition ? detailedMarkup(x, y, z, definition, shownResult) : '';
   inspectedResult = shownResult;
   tileCandidates = [];
   $<HTMLButtonElement>('inspect-tab').disabled = false;
@@ -482,6 +521,7 @@ export function inspect(
 
 export function initInspector(): void {
   $('detailed-view').onchange = paintInspector;
+  document.addEventListener('atlas-comparison-updated', paintInspector);
 }
 
 function paintAreaInspector(area: AreaSelection): void {

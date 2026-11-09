@@ -7,6 +7,7 @@ import { tileAtScreen, screenCenterX, screenCenterY } from '../rendering/project
 import { frameStats } from '../rendering/render.ts';
 import { detailForZoom } from '../model/view-state.ts';
 import { state } from './state.ts';
+import { oldView } from '../data/comparison.ts';
 
 function snapshot() {
   return {
@@ -26,6 +27,20 @@ function snapshot() {
     detail: String(detailForZoom(state.zoom)),
     centerTile: state.map ? tileAtScreen(screenCenterX(), screenCenterY()) : null,
     selected: state.selected,
+    comparison: oldView.map
+      ? {
+          commit: oldView.manifest?.commit,
+          x: oldView.x,
+          y: oldView.y,
+          zoom: oldView.zoom,
+          z: oldView.z,
+          changedTiles: state.changedTiles.length,
+          centerTile: {
+            x: Math.floor(oldView.x / 32) + 1,
+            y: oldView.map.height - Math.floor(oldView.y / 32),
+          },
+        }
+      : null,
     images: imageStats(),
     frame: frameStats(),
     width: Math.round(state.w),

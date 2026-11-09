@@ -11,6 +11,9 @@ export interface Manifest {
   buildId?: string;
   commit: string;
   repository: string;
+  /** Mounted working files differ from HEAD, or cannot be verified through Git. */
+  dirty?: boolean;
+  revisionVerified?: boolean;
   /** Folder (relative to data/) holding the current snapshot, if any. */
   dataPath?: string;
   tilePixels: number;
